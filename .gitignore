@@ -1,0 +1,28 @@
+# Go
+/bin/
+flight-tracker
+*.test
+*.out
+coverage.txt
+
+# Node / Vite
+web/node_modules/
+web/dist/
+!web/dist/.keep
+web/.vite/
+*.log
+
+# Env
+.env
+.env.local
+.envrc
+
+# Editor
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Claude working files
+.claude/plans/
+.claude/specs/

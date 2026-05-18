@@ -1,0 +1,22 @@
+[Unit]
+Description=Flight Tracker (Go + Vite SPA)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=flight-tracker
+Group=flight-tracker
+WorkingDirectory=/opt/flight-tracker
+EnvironmentFile=/etc/flight-tracker.env
+ExecStart=/opt/flight-tracker/flight-tracker
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/flight-tracker
+
+[Install]
+WantedBy=multi-user.target

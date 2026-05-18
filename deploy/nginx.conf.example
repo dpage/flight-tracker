@@ -1,0 +1,47 @@
+# Example nginx config for flight-tracker behind a Let's Encrypt cert.
+# Place under /etc/nginx/sites-available/ and symlink into sites-enabled.
+#
+# Notes:
+#   - The Go process serves the SPA, JSON API, OAuth callback, and SSE stream
+#     on a single upstream — nginx only does TLS termination and forwarding.
+#   - proxy_buffering must be off for /api/events so Server-Sent Events flush
+#     to the client immediately.
+
+server {
+    listen 443 ssl http2;
+    server_name flights.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/flights.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/flights.example.com/privkey.pem;
+
+    # Standard reverse-proxy block.
+    location / {
+        proxy_pass         http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Server-Sent Events: keep the connection alive and unbuffered.
+    location /api/events {
+        proxy_pass         http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 1h;
+        chunked_transfer_encoding on;
+    }
+}
+
+server {
+    listen 80;
+    server_name flights.example.com;
+    return 301 https://$host$request_uri;
+}

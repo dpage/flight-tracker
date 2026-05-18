@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS positions;
+DROP TABLE IF EXISTS flight_passengers;
+DROP TABLE IF EXISTS flights;
+DROP TABLE IF EXISTS users;
+
