@@ -1,5 +1,7 @@
 # flight-tracker
 
+[![CI](https://github.com/dpage/flight-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/dpage/flight-tracker/actions/workflows/ci.yml)
+
 Single-binary Go + React app that tracks your friends' flights on a live world map.
 Built for the small ritual of "who's already in the air to PostgreSQL Conference Europe?"
 

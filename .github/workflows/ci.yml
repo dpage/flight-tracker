@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: flight_tracker
+          POSTGRES_PASSWORD: flight_tracker
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flight_tracker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # testsupport connects here to CREATE/DROP an isolated DB per test.
+      TEST_DATABASE_URL: postgres://flight_tracker:flight_tracker@127.0.0.1:5432/postgres?sslmode=disable
+      # Fail (don't skip) DB-backed tests if Postgres is unreachable.
+      FT_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: go vet
+        run: go vet ./cmd/... ./internal/... ./migrations ./web
+
+      - name: Go tests
+        run: go test ./cmd/... ./internal/... ./migrations ./web
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Web typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Web lint
+        working-directory: web
+        run: npm run lint
+
+      - name: Web tests (per-file 90% coverage gate)
+        working-directory: web
+        run: npm run test:coverage
