@@ -115,15 +115,22 @@ func TestGetMeAndConfig(t *testing.T) {
 	}
 
 	w = e.req(t, "GET", "/api/config", nil, uid)
-	cap := decodeBody[map[string]bool](t, w)
-	if !cap["resolver_available"] {
-		t.Errorf("resolver_available should be true, got %v", cap)
+	caps := decodeBody[map[string]any](t, w)
+	if caps["resolver_available"] != true {
+		t.Errorf("resolver_available should be true, got %v", caps)
+	}
+	// The DTO grew a poll_interval_sec field; just assert it's present so
+	// future shape changes are caught here. The value is whatever the test
+	// fixture's Config sets — zero by default, which is fine for the wire
+	// format.
+	if _, ok := caps["poll_interval_sec"]; !ok {
+		t.Errorf("poll_interval_sec missing from /api/config response: %v", caps)
 	}
 
 	// No resolver / nil config → false.
 	e2 := setup(t, nil, &config.Config{})
 	w = e2.req(t, "GET", "/api/config", nil, e2.user(t, "u", false))
-	if decodeBody[map[string]bool](t, w)["resolver_available"] {
+	if decodeBody[map[string]any](t, w)["resolver_available"] != false {
 		t.Error("resolver_available should be false")
 	}
 }
