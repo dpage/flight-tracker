@@ -136,6 +136,54 @@ func TestDeadReckonClampsFractionPastArrival(t *testing.T) {
 	}
 }
 
+// Step-3 fallback: no inner fix AND no real anchor in the DB, but the flight
+// has origin / destination / schedule and is currently airborne. The
+// DeadReckoner should synthesise a schedule-interpolated position (same
+// math the Stub uses) so the map isn't blank for flights that never get
+// any real ADS-B contact.
+func TestDeadReckonScheduleFallbackWhenNoAnchorEver(t *testing.T) {
+	f := baseFlight() // out=10:00 UTC, in=14:00 UTC, LHR → JFK
+	// Halfway through.
+	now := f.ScheduledOut.Add(2 * time.Hour)
+	d := NewDeadReckoner(fakeTracker{}, fakeAnchor{}) // anchor returns nil, nil
+	p, err := d.Track(context.Background(), f, now)
+	if err != nil {
+		t.Fatalf("Track: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected a synthesised position, got nil")
+	}
+	if !p.IsEstimated {
+		t.Error("schedule fallback must flag is_estimated=true")
+	}
+	// At t=halfway, expect a position mid-Atlantic. The great-circle arc
+	// from LHR to JFK bends north over the ocean (passes over southern
+	// Greenland-ish), so latitude at the halfway point sits ABOVE both
+	// endpoints (typically ~52°N) rather than between them.
+	if p.Lat < 40 || p.Lat > 60 || p.Lon > -5 || p.Lon < -73 {
+		t.Errorf("midpoint should be over the Atlantic, got (%v, %v)", p.Lat, p.Lon)
+	}
+	if p.HeadingDeg == nil {
+		t.Error("heading should be populated from bearing(now → dest)")
+	}
+}
+
+// And the boundary: a flight outside its air-time window with no anchor
+// and no inner fix returns nil — we don't fabricate positions for flights
+// that haven't departed or have already landed.
+func TestDeadReckonScheduleFallbackOutsideWindow(t *testing.T) {
+	f := baseFlight()
+	d := NewDeadReckoner(fakeTracker{}, fakeAnchor{})
+	pre := f.ScheduledOut.Add(-time.Hour)
+	if p, _ := d.Track(context.Background(), f, pre); p != nil {
+		t.Errorf("pre-departure should be nil, got %+v", p)
+	}
+	post := f.ScheduledIn.Add(time.Hour)
+	if p, _ := d.Track(context.Background(), f, post); p != nil {
+		t.Errorf("post-arrival should be nil, got %+v", p)
+	}
+}
+
 func TestDeadReckonElapsedExceedsRemaining(t *testing.T) {
 	f := baseFlight()
 	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)

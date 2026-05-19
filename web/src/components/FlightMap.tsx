@@ -39,6 +39,10 @@ export default function FlightMap() {
     () => buildRemaining(flights, selectedFlightId),
     [flights, selectedFlightId],
   );
+  const completedFC = useMemo(
+    () => buildCompleted(flights, selectedFlightId),
+    [flights, selectedFlightId],
+  );
 
   // Initialise the MapLibre instance once. Two line sources: the FLOWN track
   // (origin → recorded positions → current, drawn solid) and the REMAINING
@@ -54,8 +58,23 @@ export default function FlightMap() {
     });
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
     map.on('load', () => {
+      map.addSource('completed', { type: 'geojson', data: emptyFC() });
       map.addSource('flown', { type: 'geojson', data: emptyFC() });
       map.addSource('remaining', { type: 'geojson', data: emptyFC() });
+      // Completed routes underneath everything else: a muted grey great-
+      // circle for flights that have arrived (or been cancelled). Selection
+      // gives it the same orange the live layers use, so picking an arrived
+      // flight still highlights its route on the map.
+      map.addLayer({
+        id: 'completed-line',
+        type: 'line',
+        source: 'completed',
+        paint: {
+          'line-color': ['case', ['get', 'selected'], '#d97706', '#9ca3af'],
+          'line-width': ['case', ['get', 'selected'], 2.5, 2],
+          'line-opacity': 0.7,
+        },
+      });
       map.addLayer({
         id: 'remaining-line',
         type: 'line',
@@ -93,10 +112,11 @@ export default function FlightMap() {
     const apply = () => {
       (map.getSource('flown') as maplibregl.GeoJSONSource | undefined)?.setData(flownFC);
       (map.getSource('remaining') as maplibregl.GeoJSONSource | undefined)?.setData(remainingFC);
+      (map.getSource('completed') as maplibregl.GeoJSONSource | undefined)?.setData(completedFC);
     };
     if (map.isStyleLoaded()) apply();
     else map.once('load', apply);
-  }, [flownFC, remainingFC]);
+  }, [flownFC, remainingFC, completedFC]);
 
   // Auto-fit the map when the set of renderable flights changes — keeps newly
   // added flights from being off-screen. Skipped if the user has a flight
@@ -280,6 +300,31 @@ function buildFlown(flights: Flight[], selectedId: number | null): GeoJSON.Featu
   return { type: 'FeatureCollection', features };
 }
 
+// buildCompleted returns one feature per Arrived / Cancelled flight that
+// has origin + destination coords: a single great-circle from origin to
+// destination, rendered grey by the completed-line layer. Indicates "this
+// flight is done" without showing a live plane marker.
+function buildCompleted(flights: Flight[], selectedId: number | null): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const f of flights) {
+    if (f.status !== 'Arrived' && f.status !== 'Cancelled') continue;
+    if (f.origin_lat == null || f.origin_lon == null) continue;
+    if (f.dest_lat == null || f.dest_lon == null) continue;
+    const gc = greatCircle(f.origin_lat, f.origin_lon, f.dest_lat, f.dest_lon);
+    const parts = toMultiLine(gc);
+    if (parts.length === 0) continue;
+    features.push({
+      type: 'Feature',
+      properties: { id: f.id, selected: f.id === selectedId },
+      geometry:
+        parts.length === 1
+          ? { type: 'LineString', coordinates: parts[0] }
+          : { type: 'MultiLineString', coordinates: parts },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 // buildRemaining returns one feature per flight: a (multi-)line from the
 // "current" anchor (latest_position when known, otherwise origin) to the
 // destination, drawn as a dashed great-circle. Skipped once a flight is
@@ -360,3 +405,7 @@ function hasGeometry(f: Flight): boolean {
     f.latest_position != null
   );
 }
+
+// hasGeometry already covers the arrived-with-coords case (origin + dest
+// known), so auto-fit picks them up; allFlightsBounds covers their points.
+// No change needed there.

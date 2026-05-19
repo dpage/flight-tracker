@@ -59,7 +59,8 @@ describe('FlightMap lifecycle', () => {
     expect(map.controls).toHaveLength(1);
     expect(map.sources.has('flown')).toBe(true);
     expect(map.sources.has('remaining')).toBe(true);
-    expect(map.layers).toHaveLength(2);
+    expect(map.sources.has('completed')).toBe(true);
+    expect(map.layers).toHaveLength(3);
     unmount();
     expect(map.remove).toHaveBeenCalled();
   });
@@ -77,6 +78,26 @@ describe('FlightMap lifecycle', () => {
     const map = FakeMap.instances[0];
     expect(map.getSource('flown')?.setData).toHaveBeenCalled();
     expect(map.getSource('remaining')?.setData).toHaveBeenCalled();
+    expect(map.getSource('completed')?.setData).toHaveBeenCalled();
+  });
+
+  it('renders an Arrived flight as a grey completed-route great-circle', () => {
+    h.state.flights = [
+      flight({ status: 'Arrived', latest_position: undefined }),
+    ];
+    render(<FlightMap />);
+    const map = FakeMap.instances[0];
+    const completed = map.getSource('completed')!.setData.mock
+      .calls.at(-1)![0] as GeoJSON.FeatureCollection;
+    expect(completed.features).toHaveLength(1);
+    // Arrived flights produce no remaining-line (nothing remaining) and no
+    // flown-line (no logged track for a flight added post-arrival).
+    const remaining = map.getSource('remaining')!.setData.mock
+      .calls.at(-1)![0] as GeoJSON.FeatureCollection;
+    const flown = map.getSource('flown')!.setData.mock
+      .calls.at(-1)![0] as GeoJSON.FeatureCollection;
+    expect(remaining.features).toHaveLength(0);
+    expect(flown.features).toHaveLength(0);
   });
 
   it('defers data apply via once(load) when style not yet loaded', () => {
