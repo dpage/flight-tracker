@@ -9,6 +9,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // userEvent.type fires one input event per keystroke; with v8 coverage
+    // instrumentation each handler is meaningfully slower on CI hardware,
+    // occasionally pushing the multi-input dialog tests past the default
+    // 5s. 15s gives us headroom for the slow case without masking genuinely
+    // stuck tests.
+    testTimeout: 15000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],
