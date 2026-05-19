@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AppBar,
   Avatar,
@@ -9,11 +9,15 @@ import {
   Toolbar,
   Tooltip,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
 import { useStore } from '../state/store';
 import FlightList from './FlightList';
@@ -24,11 +28,21 @@ import AdminDialog from './AdminDialog';
 export default function AppShell() {
   const me = useStore((s) => s.me);
   const logout = useStore((s) => s.logout);
+  const theme = useTheme();
+  const isNarrow = useMediaQuery(theme.breakpoints.down('sm'));
   const [flightDialog, setFlightDialog] = useState<{ open: boolean; editId: number | null }>({
     open: false,
     editId: null,
   });
   const [adminOpen, setAdminOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow);
+
+  // After the sidebar finishes its width transition, fire a window resize so
+  // MapLibre re-measures and the map fills the available space cleanly.
+  useEffect(() => {
+    const t = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+    return () => window.clearTimeout(t);
+  }, [sidebarOpen]);
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -69,17 +83,46 @@ export default function AppShell() {
       <Box sx={{ display: 'flex', flexGrow: 1, minHeight: 0 }}>
         <Box
           sx={{
-            width: 360,
-            borderRight: 1,
+            width: sidebarOpen ? { xs: '85vw', sm: 360 } : 0,
+            minWidth: sidebarOpen ? { xs: '85vw', sm: 360 } : 0,
+            transition: 'width 200ms ease, min-width 200ms ease',
+            borderRight: sidebarOpen ? 1 : 0,
             borderColor: 'divider',
             overflowY: 'auto',
+            overflowX: 'hidden',
             bgcolor: 'background.paper',
           }}
         >
           <FlightList onEditFlight={(id) => setFlightDialog({ open: true, editId: id })} />
         </Box>
-        <Box sx={{ flexGrow: 1, position: 'relative' }}>
+        <Box sx={{ flexGrow: 1, position: 'relative', minWidth: 0 }}>
           <FlightMap />
+          <Tooltip title={sidebarOpen ? 'Hide flights' : 'Show flights'} placement="right">
+            <IconButton
+              onClick={() => setSidebarOpen((o) => !o)}
+              size="small"
+              aria-label={sidebarOpen ? 'Hide flight list' : 'Show flight list'}
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: 0,
+                transform: 'translateY(-50%)',
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                border: 1,
+                borderColor: 'divider',
+                borderLeft: 0,
+                borderRadius: '0 8px 8px 0',
+                boxShadow: 2,
+                px: 0.25,
+                py: 1.5,
+                zIndex: 2,
+                '&:hover': { bgcolor: 'background.paper' },
+              }}
+            >
+              {sidebarOpen ? <ChevronLeftIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
