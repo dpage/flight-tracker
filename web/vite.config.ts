@@ -18,5 +18,11 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: true,
+    // Skip the "computing gzip size" step. It gzips the entire bundle in
+    // memory just to print one number in the build log, and on small VPS
+    // boxes (e.g. Hetzner CX11) the gzip buffer is enough to push Node
+    // past available RAM and trip the OOM killer mid-build. Doesn't affect
+    // the output — assets are served gzip-compressed at runtime regardless.
+    reportCompressedSize: false,
   },
 });
