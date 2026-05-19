@@ -7,8 +7,8 @@ WEB_DIR   := web
 BIN_DIR   := bin
 BIN_NAME  := flight-tracker
 
-.PHONY: build build-go build-web run dev test test-go lint lint-go lint-web \
-        typecheck-web fmt-web clean tidy
+.PHONY: build build-go build-web run dev test test-go test-web cover-go \
+        cover-web lint lint-go lint-web typecheck-web fmt-web clean tidy
 
 ## build: build the SPA, then the Go binary that embeds it.
 build: build-web build-go
@@ -35,15 +35,32 @@ dev:
 		($(GO) run ./cmd/server &) && \
 		cd $(WEB_DIR) && $(NPM) run dev"
 
-test: test-go
+## test: run the Go and web test suites.
+test: test-go test-web
+
+# ./... would also descend into web/node_modules; list the source roots
+# explicitly so a populated node_modules doesn't get compiled/tested.
+GO_PKGS := ./cmd/... ./internal/... ./migrations ./web
 
 test-go:
-	$(GO) test ./...
+	$(GO) test $(GO_PKGS)
+
+## cover-go: per-package Go coverage summary.
+cover-go:
+	$(GO) test -covermode=set -coverprofile=coverage.out $(GO_PKGS)
+	$(GO) tool cover -func=coverage.out | tail -1
+
+test-web:
+	cd $(WEB_DIR) && $(NPM) run test
+
+## cover-web: web coverage with the per-file 90% threshold gate.
+cover-web:
+	cd $(WEB_DIR) && $(NPM) run test:coverage
 
 lint: lint-go lint-web
 
 lint-go:
-	$(GO) vet ./...
+	$(GO) vet $(GO_PKGS)
 
 lint-web:
 	cd $(WEB_DIR) && $(NPM) run lint

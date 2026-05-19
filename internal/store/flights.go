@@ -205,7 +205,7 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 			dest_iata     = COALESCE($7, dest_iata),
 			dest_lat      = COALESCE($8, dest_lat),
 			dest_lon      = COALESCE($9, dest_lon),
-			icao24        = CASE WHEN $13::boolean THEN $14 ELSE icao24 END,
+			icao24        = CASE WHEN $12::boolean THEN $13 ELSE icao24 END,
 			notes         = COALESCE($10, notes),
 			status = COALESCE($11, CASE
 				WHEN status IN ('Cancelled', 'Diverted') THEN status

@@ -16,8 +16,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "types": ["vitest/globals", "node"]
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test", "vitest.config.ts"]
 }

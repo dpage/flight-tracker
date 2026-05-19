@@ -4,12 +4,14 @@ flight-tracker
 *.test
 *.out
 coverage.txt
+coverage.html
 
 # Node / Vite
 web/node_modules/
 web/dist/
 !web/dist/.keep
 web/.vite/
+web/coverage/
 *.tsbuildinfo
 *.log
 

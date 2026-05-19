@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  { ignores: ['dist', 'coverage'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended, prettier],
     files: ['**/*.{ts,tsx}'],
@@ -22,6 +22,18 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  // Test-only override: allow `any` and Node/Vitest globals in test files.
+  // Does NOT weaken any rule for application source under src (non-test).
+  {
+    files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}', 'vitest.config.ts'],
+    languageOptions: {
+      globals: { ...globals.node, vi: 'readonly' },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      'react-refresh/only-export-components': 'off',
     },
   },
 );

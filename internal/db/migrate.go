@@ -59,6 +59,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, mfs fs.FS) error {
 		applied[v] = true
 	}
 	rows.Close()
+	// pgx surfaces query errors lazily via Err(); without this check a failed
+	// applied-versions read would be silently treated as "nothing applied".
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	for _, m := range ups {
 		if applied[m.version] {
