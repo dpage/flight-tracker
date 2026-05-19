@@ -40,18 +40,21 @@ type PositionDTO struct {
 	AltitudeFt    *int32    `json:"altitude_ft,omitempty"`
 	GroundspeedKt *int32    `json:"groundspeed_kt,omitempty"`
 	HeadingDeg    *int16    `json:"heading_deg,omitempty"`
+	IsEstimated   bool      `json:"is_estimated"`
 }
 
 func ToPositionDTO(p *store.Position) PositionDTO {
 	return PositionDTO{
 		Ts: p.Ts, Lat: p.Lat, Lon: p.Lon,
 		AltitudeFt: p.AltitudeFt, GroundspeedKt: p.GroundspeedKt, HeadingDeg: p.HeadingDeg,
+		IsEstimated: p.IsEstimated,
 	}
 }
 
 type FlightDTO struct {
 	ID             int64        `json:"id"`
 	Ident          string       `json:"ident"`
+	ICAO24         *string      `json:"icao24,omitempty"`
 	ScheduledOut   time.Time    `json:"scheduled_out"`
 	ScheduledIn    time.Time    `json:"scheduled_in"`
 	EstimatedOut   *time.Time   `json:"estimated_out,omitempty"`
@@ -79,6 +82,7 @@ func ToFlightDTO(f *store.Flight, passengerIDs []int64, latest *store.Position) 
 	dto := FlightDTO{
 		ID:           f.ID,
 		Ident:        f.Ident,
+		ICAO24:       f.ICAO24,
 		ScheduledOut: f.ScheduledOut,
 		ScheduledIn:  f.ScheduledIn,
 		EstimatedOut: f.EstimatedOut,

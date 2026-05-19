@@ -1,0 +1,2 @@
+ALTER TABLE flights   DROP COLUMN IF EXISTS icao24;
+ALTER TABLE positions DROP COLUMN IF EXISTS is_estimated;

@@ -16,6 +16,13 @@ export interface Position {
   altitude_ft?: number;
   groundspeed_kt?: number;
   heading_deg?: number;
+  /** True for dead-reckoned positions filling an ADS-B coverage gap. */
+  is_estimated: boolean;
+}
+
+export interface Capabilities {
+  /** When true, the Add Flight dialog can drop to "ident + date" only. */
+  resolver_available: boolean;
 }
 
 export type FlightStatus =
@@ -31,6 +38,7 @@ export type FlightStatus =
 export interface Flight {
   id: number;
   ident: string;
+  icao24?: string;
   scheduled_out: string;
   scheduled_in: string;
   estimated_out?: string;
@@ -57,6 +65,7 @@ export interface CreateFlightInput {
   scheduled_in: string;
   origin_iata: string;
   dest_iata: string;
+  icao24?: string;
   notes?: string;
   passenger_ids?: number[];
 }
@@ -66,6 +75,7 @@ export interface UpdateFlightInput {
   scheduled_in?: string;
   origin_iata?: string;
   dest_iata?: string;
+  icao24?: string;
   notes?: string;
   status?: FlightStatus;
 }

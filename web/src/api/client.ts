@@ -1,4 +1,5 @@
 import type {
+  Capabilities,
   CreateFlightInput,
   Flight,
   InviteUserInput,
@@ -47,6 +48,7 @@ export const api = {
   },
 
   getMe: () => request<User>('GET', '/api/me'),
+  getConfig: () => request<Capabilities>('GET', '/api/config'),
 
   listFlights: () => request<Flight[]>('GET', '/api/flights'),
   getFlight: (id: number) => request<Flight>('GET', `/api/flights/${id}`),

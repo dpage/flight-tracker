@@ -45,6 +45,7 @@ type Flight struct {
 	DestLon       *float64
 	Status        string
 	AeroAPIID     *string
+	ICAO24        *string
 	LastPolledAt  *time.Time
 	CreatedBy     *int64
 	Notes         string
@@ -60,4 +61,5 @@ type Position struct {
 	AltitudeFt    *int32
 	GroundspeedKt *int32
 	HeadingDeg    *int16
+	IsEstimated   bool
 }

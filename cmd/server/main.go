@@ -59,15 +59,24 @@ func run() error {
 	s := store.New(pool)
 	authH := auth.NewHandler(cfg.GitHubID, cfg.GitHubSecret, cfg.SessionKey, cfg.PublicURL, s)
 	hub := sse.NewHub()
-	api := handlers.New(s, authH, hub)
+	api := handlers.New(s, authH, hub, cfg)
 
-	var ac aeroapi.Client
-	if cfg.StubAeroAPI() {
-		ac = aeroapi.NewStub()
-	} else {
-		ac = aeroapi.NewLive(cfg.AeroAPIKey, cfg.AeroAPIBase)
+	// Pick the upstream tracker. OpenSky if credentials are configured (or
+	// anonymous OpenSky if requested), otherwise the in-memory stub. Either
+	// way we wrap with DeadReckoner so coverage gaps fall back to an
+	// extrapolation from the last real fix.
+	var inner aeroapi.Tracker
+	switch {
+	case cfg.UseOpenSky():
+		inner = aeroapi.NewOpenSky(cfg.OpenSkyUsername, cfg.OpenSkyPassword)
+		slog.Info("tracker: opensky",
+			"authed", cfg.OpenSkyUsername != "")
+	default:
+		inner = aeroapi.NewStub()
+		slog.Info("tracker: stub")
 	}
-	p := poller.New(s, ac, hub, cfg.PollInterval)
+	tracker := aeroapi.NewDeadReckoner(inner, s)
+	p := poller.New(s, tracker, hub, cfg.PollInterval)
 	go p.Run(rootCtx)
 
 	mux := http.NewServeMux()
@@ -94,8 +103,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", cfg.ListenAddr, "public_url", cfg.PublicURL,
-			"aeroapi", map[bool]string{true: "stub", false: "live"}[cfg.StubAeroAPI()])
+		slog.Info("listening", "addr", cfg.ListenAddr, "public_url", cfg.PublicURL)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}

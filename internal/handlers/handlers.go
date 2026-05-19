@@ -8,18 +8,20 @@ import (
 	"strconv"
 
 	"github.com/dpage/flight-tracker/internal/auth"
+	"github.com/dpage/flight-tracker/internal/config"
 	"github.com/dpage/flight-tracker/internal/sse"
 	"github.com/dpage/flight-tracker/internal/store"
 )
 
 type API struct {
-	Store *store.Store
-	Auth  *auth.Handler
-	Hub   *sse.Hub
+	Store  *store.Store
+	Auth   *auth.Handler
+	Hub    *sse.Hub
+	Config *config.Config
 }
 
-func New(s *store.Store, a *auth.Handler, hub *sse.Hub) *API {
-	return &API{Store: s, Auth: a, Hub: hub}
+func New(s *store.Store, a *auth.Handler, hub *sse.Hub, cfg *config.Config) *API {
+	return &API{Store: s, Auth: a, Hub: hub, Config: cfg}
 }
 
 // Register attaches every /api/* route. All routes require an authenticated
@@ -29,6 +31,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	sup := a.Auth.RequireSuperuser
 
 	mux.Handle("GET /api/me", req(http.HandlerFunc(a.getMe)))
+	mux.Handle("GET /api/config", req(http.HandlerFunc(a.getConfig)))
 	mux.Handle("GET /api/events", req(http.HandlerFunc(a.Hub.Handle)))
 
 	mux.Handle("GET /api/flights", req(http.HandlerFunc(a.listFlights)))

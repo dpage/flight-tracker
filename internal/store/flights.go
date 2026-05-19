@@ -15,7 +15,7 @@ const flightColumns = `id, ident, scheduled_out, scheduled_in,
 	estimated_out, estimated_in, actual_out, actual_in,
 	origin_iata, origin_lat, origin_lon,
 	dest_iata, dest_lat, dest_lon,
-	status, aeroapi_id, last_polled_at, created_by, notes, created_at, updated_at`
+	status, aeroapi_id, icao24, last_polled_at, created_by, notes, created_at, updated_at`
 
 func scanFlight(row pgx.Row) (*Flight, error) {
 	var f Flight
@@ -24,7 +24,7 @@ func scanFlight(row pgx.Row) (*Flight, error) {
 		&f.EstimatedOut, &f.EstimatedIn, &f.ActualOut, &f.ActualIn,
 		&f.OriginIATA, &f.OriginLat, &f.OriginLon,
 		&f.DestIATA, &f.DestLat, &f.DestLon,
-		&f.Status, &f.AeroAPIID, &f.LastPolledAt, &f.CreatedBy, &f.Notes, &f.CreatedAt, &f.UpdatedAt,
+		&f.Status, &f.AeroAPIID, &f.ICAO24, &f.LastPolledAt, &f.CreatedBy, &f.Notes, &f.CreatedAt, &f.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -91,6 +91,7 @@ type CreateFlightPayload struct {
 	ScheduledIn  time.Time
 	OriginIATA   string
 	DestIATA     string
+	ICAO24       string
 	Notes        string
 }
 
@@ -109,17 +110,28 @@ func (s *Store) CreateFlight(ctx context.Context, in CreateFlightPayload, create
 	destIATA := strings.ToUpper(in.DestIATA)
 	originLat, originLon := lookupCoords(originIATA)
 	destLat, destLon := lookupCoords(destIATA)
+	icao24 := normalizeICAO24(in.ICAO24)
 	return scanFlight(s.pool.QueryRow(ctx, `
 		INSERT INTO flights (ident, scheduled_out, scheduled_in,
 			origin_iata, origin_lat, origin_lon,
 			dest_iata,   dest_lat,   dest_lon,
-			notes, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			icao24, notes, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING `+flightColumns,
 		ident, in.ScheduledOut, in.ScheduledIn,
 		originIATA, originLat, originLon,
 		destIATA, destLat, destLon,
-		in.Notes, createdBy))
+		icao24, in.Notes, createdBy))
+}
+
+// normalizeICAO24 returns a lowercase hex string with no whitespace, or nil
+// if the input is empty.
+func normalizeICAO24(s string) *string {
+	v := strings.ToLower(strings.TrimSpace(s))
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // lookupCoords returns *float64 (nullable) so callers can pass it straight to
@@ -137,6 +149,7 @@ type UpdateFlightPayload struct {
 	ScheduledIn  *time.Time
 	OriginIATA   *string
 	DestIATA     *string
+	ICAO24       *string
 	Notes        *string
 	Status       *string
 }
@@ -159,6 +172,12 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 	// leave the status pill stale until the next poll tick — and if the new
 	// arrival is in the past, the poller drops the row from active_flights
 	// and never reconsiders it.
+	// in.ICAO24 == nil means "leave alone". A pointer to the empty string
+	// means "clear" — represented as a SQL NULL via NULLIF.
+	var icao24Arg any
+	if in.ICAO24 != nil {
+		icao24Arg = normalizeICAO24(*in.ICAO24)
+	}
 	return scanFlight(s.pool.QueryRow(ctx, `
 		UPDATE flights SET
 			scheduled_out = COALESCE($2, scheduled_out),
@@ -169,6 +188,7 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 			dest_iata     = COALESCE($7, dest_iata),
 			dest_lat      = COALESCE($8, dest_lat),
 			dest_lon      = COALESCE($9, dest_lon),
+			icao24        = CASE WHEN $13::boolean THEN $14 ELSE icao24 END,
 			notes         = COALESCE($10, notes),
 			status = COALESCE($11, CASE
 				WHEN status IN ('Cancelled', 'Diverted') THEN status
@@ -182,7 +202,27 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 		id, in.ScheduledOut, in.ScheduledIn,
 		originIATA, originLat, originLon,
 		destIATA, destLat, destLon,
-		in.Notes, in.Status))
+		in.Notes, in.Status,
+		in.ICAO24 != nil, icao24Arg))
+}
+
+// RefreshFlightStatus re-derives status from the row's scheduled times alone,
+// preserving terminal Cancelled / Diverted statuses. Called by the poller
+// after writing a position so the status pill stays in lockstep with the
+// schedule without us having to write extra application logic.
+func (s *Store) RefreshFlightStatus(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE flights SET
+			status = CASE
+				WHEN status IN ('Cancelled', 'Diverted') THEN status
+				WHEN NOW() > scheduled_in  THEN 'Arrived'
+				WHEN NOW() >= scheduled_out THEN 'Enroute'
+				ELSE 'Scheduled'
+			END,
+			last_polled_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1`, id)
+	return err
 }
 
 func (s *Store) DeleteFlight(ctx context.Context, id int64) error {
@@ -240,6 +280,29 @@ func (s *Store) PassengersByFlight(ctx context.Context, flightIDs []int64) (map[
 	return out, rows.Err()
 }
 
+// LatestRealPosition returns the most recent position from ADS-B / airline
+// data (i.e. NOT estimated) for a flight, or nil if there isn't one. The
+// dead-reckoner uses this as its anchor point when extrapolating across
+// coverage gaps.
+func (s *Store) LatestRealPosition(ctx context.Context, flightID int64) (*Position, error) {
+	var p Position
+	err := s.pool.QueryRow(ctx, `
+		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
+		FROM positions
+		WHERE flight_id = $1 AND is_estimated = FALSE
+		ORDER BY ts DESC
+		LIMIT 1`, flightID,
+	).Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
+		&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil //nolint:nilnil // genuine "no data yet"
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // LatestPositions returns the latest position per flight for the given IDs.
 func (s *Store) LatestPositions(ctx context.Context, flightIDs []int64) (map[int64]*Position, error) {
 	out := map[int64]*Position{}
@@ -248,7 +311,7 @@ func (s *Store) LatestPositions(ctx context.Context, flightIDs []int64) (map[int
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (flight_id)
-			flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg
+			flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
 		FROM positions
 		WHERE flight_id = ANY($1)
 		ORDER BY flight_id, ts DESC`, flightIDs)
@@ -259,7 +322,7 @@ func (s *Store) LatestPositions(ctx context.Context, flightIDs []int64) (map[int
 	for rows.Next() {
 		var p Position
 		if err := rows.Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg); err != nil {
+			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated); err != nil {
 			return nil, err
 		}
 		pCopy := p
@@ -274,7 +337,7 @@ func (s *Store) PositionsForFlight(ctx context.Context, flightID int64, limit in
 		limit = 500
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg
+		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
 		FROM positions
 		WHERE flight_id = $1
 		ORDER BY ts DESC
@@ -287,7 +350,7 @@ func (s *Store) PositionsForFlight(ctx context.Context, flightID int64, limit in
 	for rows.Next() {
 		var p Position
 		if err := rows.Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg); err != nil {
+			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated); err != nil {
 			return nil, err
 		}
 		out = append(out, &p)
@@ -298,49 +361,12 @@ func (s *Store) PositionsForFlight(ctx context.Context, flightID int64, limit in
 // InsertPosition appends a position sample for a flight.
 func (s *Store) InsertPosition(ctx context.Context, p Position) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO positions (flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		p.FlightID, p.Ts, p.Lat, p.Lon, p.AltitudeFt, p.GroundspeedKt, p.HeadingDeg)
+		INSERT INTO positions (flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		p.FlightID, p.Ts, p.Lat, p.Lon, p.AltitudeFt, p.GroundspeedKt, p.HeadingDeg, p.IsEstimated)
 	return err
 }
 
-// UpdateFlightTracking updates the columns the poller refreshes from AeroAPI.
-type TrackingUpdate struct {
-	Status       string
-	EstimatedOut *time.Time
-	EstimatedIn  *time.Time
-	ActualOut    *time.Time
-	ActualIn     *time.Time
-	OriginIATA   string
-	OriginLat    *float64
-	OriginLon    *float64
-	DestIATA     string
-	DestLat      *float64
-	DestLon      *float64
-}
-
-func (s *Store) UpdateFlightTracking(ctx context.Context, id int64, t TrackingUpdate) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE flights SET
-			status = $2,
-			estimated_out = $3,
-			estimated_in = $4,
-			actual_out = $5,
-			actual_in = $6,
-			origin_iata = COALESCE(NULLIF($7, ''), origin_iata),
-			origin_lat = COALESCE($8, origin_lat),
-			origin_lon = COALESCE($9, origin_lon),
-			dest_iata = COALESCE(NULLIF($10, ''), dest_iata),
-			dest_lat = COALESCE($11, dest_lat),
-			dest_lon = COALESCE($12, dest_lon),
-			last_polled_at = NOW(),
-			updated_at = NOW()
-		WHERE id = $1`,
-		id, t.Status, t.EstimatedOut, t.EstimatedIn, t.ActualOut, t.ActualIn,
-		t.OriginIATA, t.OriginLat, t.OriginLon,
-		t.DestIATA, t.DestLat, t.DestLon)
-	return err
-}
 
 func upperPtr(s *string) *string {
 	if s == nil {

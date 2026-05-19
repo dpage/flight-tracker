@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { api, ApiError } from '../api/client';
 import type {
+  Capabilities,
   CreateFlightInput,
   Flight,
   InviteUserInput,
@@ -15,6 +16,7 @@ type AuthStatus = 'loading' | 'anonymous' | 'authenticated';
 interface AppState {
   auth: AuthStatus;
   me: User | null;
+  capabilities: Capabilities;
   flights: Flight[];
   users: User[];
   selectedFlightId: number | null;
@@ -44,6 +46,7 @@ interface AppState {
 export const useStore = create<AppState>((set, get) => ({
   auth: 'loading',
   me: null,
+  capabilities: { resolver_available: false },
   flights: [],
   users: [],
   selectedFlightId: null,
@@ -51,8 +54,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   async init() {
     try {
-      const me = await api.getMe();
-      set({ me, auth: 'authenticated' });
+      const [me, capabilities] = await Promise.all([api.getMe(), api.getConfig()]);
+      set({ me, capabilities, auth: 'authenticated' });
       await get().refreshAll();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -129,7 +132,14 @@ export const useStore = create<AppState>((set, get) => ({
 
   async logout() {
     await api.logout();
-    set({ me: null, auth: 'anonymous', flights: [], users: [], selectedFlightId: null });
+    set({
+      me: null,
+      auth: 'anonymous',
+      flights: [],
+      users: [],
+      selectedFlightId: null,
+      capabilities: { resolver_available: false },
+    });
   },
 
   selectFlight(id) {

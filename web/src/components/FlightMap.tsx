@@ -115,7 +115,12 @@ export default function FlightMap() {
       let marker = markersRef.current.get(f.id);
       const el = marker?.getElement() ?? buildMarkerEl();
       const heading = pos.heading_deg ?? 0;
-      stylePlane(el, f.id === selectedFlightId, f.ident);
+      stylePlane(
+        el,
+        f.id === selectedFlightId,
+        pos.is_estimated,
+        f.ident + (pos.is_estimated ? ' (estimated)' : ''),
+      );
       el.onclick = (e) => {
         e.stopPropagation();
         selectFlight(f.id === selectedFlightId ? null : f.id);
@@ -171,14 +176,31 @@ function buildMarkerEl(): HTMLElement {
   el.style.cursor = 'pointer';
   el.innerHTML = `
     <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"
+         stroke="currentColor" stroke-width="0"
          style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.4))">
       <path d="M12 2 L13.2 11 L22 15 L22 17 L13.2 14.5 L13 20 L16 22 L16 23 L12 22 L8 23 L8 22 L11 20 L10.8 14.5 L2 17 L2 15 L10.8 11 Z"/>
     </svg>`;
   return el;
 }
 
-function stylePlane(el: HTMLElement, selected: boolean, title: string) {
+function stylePlane(el: HTMLElement, selected: boolean, estimated: boolean, title: string) {
   el.style.color = selected ? '#d97706' : '#1f5fa8';
+  el.style.opacity = estimated ? '0.6' : '1';
+  // Switch fill → outline + dashed border when estimated, so users see at a
+  // glance that the position is dead-reckoned rather than a real fix.
+  const svg = el.querySelector('svg');
+  const path = svg?.querySelector('path');
+  if (svg && path) {
+    if (estimated) {
+      path.setAttribute('fill', 'rgba(255,255,255,0.85)');
+      path.setAttribute('stroke-width', '1.2');
+      path.setAttribute('stroke-dasharray', '2 1.5');
+    } else {
+      path.setAttribute('fill', 'currentColor');
+      path.setAttribute('stroke-width', '0');
+      path.removeAttribute('stroke-dasharray');
+    }
+  }
   el.title = title;
 }
 

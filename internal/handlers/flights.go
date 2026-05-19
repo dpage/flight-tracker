@@ -15,6 +15,7 @@ type createFlightReq struct {
 	ScheduledIn  time.Time `json:"scheduled_in"`
 	OriginIATA   string    `json:"origin_iata"`
 	DestIATA     string    `json:"dest_iata"`
+	ICAO24       string    `json:"icao24"`
 	Notes        string    `json:"notes"`
 	PassengerIDs []int64   `json:"passenger_ids"`
 }
@@ -24,6 +25,7 @@ type updateFlightReq struct {
 	ScheduledIn  *time.Time `json:"scheduled_in,omitempty"`
 	OriginIATA   *string    `json:"origin_iata,omitempty"`
 	DestIATA     *string    `json:"dest_iata,omitempty"`
+	ICAO24       *string    `json:"icao24,omitempty"`
 	Notes        *string    `json:"notes,omitempty"`
 	Status       *string    `json:"status,omitempty"`
 }
@@ -88,6 +90,7 @@ func (a *API) createFlight(w http.ResponseWriter, r *http.Request) {
 		ScheduledIn:  in.ScheduledIn,
 		OriginIATA:   in.OriginIATA,
 		DestIATA:     in.DestIATA,
+		ICAO24:       in.ICAO24,
 		Notes:        in.Notes,
 	}, me.ID)
 	if err != nil {
@@ -120,6 +123,7 @@ func (a *API) updateFlight(w http.ResponseWriter, r *http.Request) {
 		ScheduledIn:  in.ScheduledIn,
 		OriginIATA:   in.OriginIATA,
 		DestIATA:     in.DestIATA,
+		ICAO24:       in.ICAO24,
 		Notes:        in.Notes,
 		Status:       in.Status,
 	})

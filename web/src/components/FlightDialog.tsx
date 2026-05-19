@@ -24,6 +24,7 @@ interface Props {
 
 interface FormState {
   ident: string;
+  icao24: string;
   scheduledOut: Date | null;
   scheduledIn: Date | null;
   originIATA: string;
@@ -68,6 +69,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
         .filter((u): u is User => u !== undefined);
       setForm({
         ident: editing.ident,
+        icao24: editing.icao24 ?? '',
         scheduledOut: new Date(editing.scheduled_out),
         scheduledIn: new Date(editing.scheduled_in),
         originIATA: editing.origin_iata,
@@ -106,6 +108,9 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
         }
         if (originIATA !== editing.origin_iata) patch.origin_iata = originIATA;
         if (destIATA !== editing.dest_iata) patch.dest_iata = destIATA;
+        if (form.icao24.trim().toLowerCase() !== (editing.icao24 ?? '').toLowerCase()) {
+          patch.icao24 = form.icao24.trim().toLowerCase();
+        }
         if (form.notes !== editing.notes) patch.notes = form.notes;
         if (form.status !== editing.status) patch.status = form.status;
         if (Object.keys(patch).length > 0) await updateFlight(editing.id, patch);
@@ -116,6 +121,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
       } else {
         const input: CreateFlightInput = {
           ident: form.ident.trim().toUpperCase(),
+          icao24: form.icao24.trim().toLowerCase() || undefined,
           scheduled_out: form.scheduledOut.toISOString(),
           scheduled_in: form.scheduledIn.toISOString(),
           origin_iata: form.originIATA.trim().toUpperCase(),
@@ -138,15 +144,30 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
       <DialogTitle>{editing ? `Edit ${editing.ident}` : 'Add flight'}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField
-            label="Flight number"
-            value={form.ident}
-            onChange={(e) => setForm({ ...form, ident: e.target.value })}
-            disabled={editing !== null}
-            autoFocus
-            required
-            placeholder="e.g. BA286"
-          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <TextField
+              label="Flight number"
+              value={form.ident}
+              onChange={(e) => setForm({ ...form, ident: e.target.value })}
+              disabled={editing !== null}
+              autoFocus
+              required
+              placeholder="e.g. BA286"
+              sx={{ flex: 2 }}
+            />
+            <TextField
+              label="ICAO24 (optional)"
+              value={form.icao24}
+              onChange={(e) => setForm({ ...form, icao24: e.target.value })}
+              placeholder="e.g. 400a1d"
+              inputProps={{
+                maxLength: 6,
+                style: { textTransform: 'lowercase', fontFamily: 'monospace' },
+              }}
+              helperText="6-char hex aircraft ID for live position lookup"
+              sx={{ flex: 1 }}
+            />
+          </Stack>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <DateTimePicker
               label="Scheduled departure (UTC)"
@@ -242,6 +263,7 @@ function emptyForm(): FormState {
   arr.setHours(arr.getHours() + 2);
   return {
     ident: '',
+    icao24: '',
     scheduledOut: dep,
     scheduledIn: arr,
     originIATA: '',

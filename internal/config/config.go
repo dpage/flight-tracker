@@ -8,16 +8,17 @@ import (
 )
 
 type Config struct {
-	ListenAddr     string
-	PublicURL      string
-	DatabaseURL    string
-	GitHubID       string
-	GitHubSecret   string
-	SessionKey     []byte
-	AeroAPIKey     string
-	AeroAPIBase    string
-	PollInterval   time.Duration
-	DevAuthBypass  bool
+	ListenAddr      string
+	PublicURL       string
+	DatabaseURL     string
+	GitHubID        string
+	GitHubSecret    string
+	SessionKey      []byte
+	OpenSkyUsername string
+	OpenSkyPassword string
+	OpenSkyEnabled  bool // true if we should query OpenSky even without creds
+	PollInterval    time.Duration
+	DevAuthBypass   bool
 }
 
 func Load() (*Config, error) {
@@ -30,15 +31,16 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr:    getenv("LISTEN_ADDR", ":8080"),
-		PublicURL:     strings.TrimRight(getenv("PUBLIC_URL", "http://localhost:8080"), "/"),
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		GitHubID:      os.Getenv("GITHUB_CLIENT_ID"),
-		GitHubSecret:  os.Getenv("GITHUB_CLIENT_SECRET"),
-		AeroAPIKey:    os.Getenv("AEROAPI_KEY"),
-		AeroAPIBase:   getenv("AEROAPI_BASE_URL", "https://aeroapi.flightaware.com/aeroapi"),
-		PollInterval:  pollInterval,
-		DevAuthBypass: os.Getenv("DEV_AUTH_BYPASS") == "1",
+		ListenAddr:      getenv("LISTEN_ADDR", ":8080"),
+		PublicURL:       strings.TrimRight(getenv("PUBLIC_URL", "http://localhost:8080"), "/"),
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		GitHubID:        os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubSecret:    os.Getenv("GITHUB_CLIENT_SECRET"),
+		OpenSkyUsername: os.Getenv("OPENSKY_USERNAME"),
+		OpenSkyPassword: os.Getenv("OPENSKY_PASSWORD"),
+		OpenSkyEnabled:  os.Getenv("OPENSKY_ENABLED") == "1",
+		PollInterval:    pollInterval,
+		DevAuthBypass:   os.Getenv("DEV_AUTH_BYPASS") == "1",
 	}
 
 	sessKey := os.Getenv("SESSION_KEY")
@@ -69,10 +71,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// StubAeroAPI reports whether to use the in-memory stub backend (no real API
-// calls). Useful for local development without an AeroAPI subscription.
-func (c *Config) StubAeroAPI() bool {
-	return c.AeroAPIKey == ""
+// UseOpenSky reports whether the OpenSky tracker should be used. We turn it
+// on whenever OpenSky credentials are configured, or whenever the operator
+// explicitly opts into anonymous OpenSky (heavily rate-limited).
+func (c *Config) UseOpenSky() bool {
+	return c.OpenSkyUsername != "" || c.OpenSkyEnabled
+}
+
+// ResolverAvailable reports whether a Resolver is wired — i.e. whether the
+// frontend can offer the minimal "ident + date" Add Flight dialog. No
+// Resolver is implemented yet, so this is always false until one lands.
+func (c *Config) ResolverAvailable() bool {
+	return false
 }
 
 func getenv(k, dflt string) string {

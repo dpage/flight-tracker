@@ -1,6 +1,7 @@
-// Package poller drives the periodic refresh of active flights via the
-// AeroAPI client, persists the results, and broadcasts updates over the SSE
-// hub. It runs as a goroutine in the same process as the HTTP server.
+// Package poller drives the periodic refresh of active flights via a
+// Tracker, persists positions, refreshes the time-derived status, and
+// broadcasts updates over the SSE hub. It runs as a goroutine in the same
+// process as the HTTP server.
 package poller
 
 import (
@@ -17,24 +18,23 @@ import (
 
 type Poller struct {
 	Store    *store.Store
-	Client   aeroapi.Client
+	Tracker  aeroapi.Tracker
 	Hub      *sse.Hub
 	Interval time.Duration
 }
 
-func New(s *store.Store, c aeroapi.Client, hub *sse.Hub, interval time.Duration) *Poller {
+func New(s *store.Store, t aeroapi.Tracker, hub *sse.Hub, interval time.Duration) *Poller {
 	if interval <= 0 {
 		interval = 60 * time.Second
 	}
-	return &Poller{Store: s, Client: c, Hub: hub, Interval: interval}
+	return &Poller{Store: s, Tracker: t, Hub: hub, Interval: interval}
 }
 
-// Run polls until ctx is cancelled.
 func (p *Poller) Run(ctx context.Context) {
 	slog.Info("poller started", "interval", p.Interval)
 	defer slog.Info("poller stopped")
 
-	// First tick immediately so a fresh server doesn't appear stale.
+	// Tick immediately on startup so a fresh server doesn't look stale.
 	p.tick(ctx)
 
 	t := time.NewTicker(p.Interval)
@@ -79,19 +79,19 @@ func (p *Poller) tick(ctx context.Context) {
 }
 
 func (p *Poller) refresh(ctx context.Context, f *store.Flight, now time.Time) {
-	up, err := p.Client.Refresh(ctx, f, now)
+	pos, err := p.Tracker.Track(ctx, f, now)
 	if err != nil {
-		slog.Warn("poller: refresh failed", "flight", f.Ident, "id", f.ID, "err", err)
-		return
+		slog.Warn("poller: track failed", "flight", f.Ident, "id", f.ID, "err", err)
 	}
-	if err := p.Store.UpdateFlightTracking(ctx, f.ID, up.Tracking); err != nil {
-		slog.Error("poller: update tracking", "id", f.ID, "err", err)
-		return
-	}
-	if up.Position != nil {
-		if err := p.Store.InsertPosition(ctx, *up.Position); err != nil {
+	if pos != nil {
+		if err := p.Store.InsertPosition(ctx, *pos); err != nil {
 			slog.Error("poller: insert position", "id", f.ID, "err", err)
 		}
+	}
+	// Always refresh the status from the schedule; preserves Cancelled /
+	// Diverted, otherwise derives Scheduled / Enroute / Arrived from times.
+	if err := p.Store.RefreshFlightStatus(ctx, f.ID); err != nil {
+		slog.Error("poller: refresh status", "id", f.ID, "err", err)
 	}
 
 	fresh, err := p.Store.FlightByID(ctx, f.ID)
