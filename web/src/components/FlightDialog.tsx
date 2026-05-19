@@ -92,14 +92,23 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
     setBusy(true);
     try {
       if (editing) {
-        await updateFlight(editing.id, {
-          scheduled_out: form.scheduledOut.toISOString(),
-          scheduled_in: form.scheduledIn.toISOString(),
-          origin_iata: form.originIATA.trim().toUpperCase(),
-          dest_iata: form.destIATA.trim().toUpperCase(),
-          notes: form.notes,
-          status: form.status,
-        });
+        // Send only fields the user actually changed. Anything we omit makes
+        // the server fall back to either the existing value (most fields) or
+        // a time-derived value (status).
+        const patch: Parameters<typeof updateFlight>[1] = {};
+        const originIATA = form.originIATA.trim().toUpperCase();
+        const destIATA = form.destIATA.trim().toUpperCase();
+        if (form.scheduledOut.getTime() !== new Date(editing.scheduled_out).getTime()) {
+          patch.scheduled_out = form.scheduledOut.toISOString();
+        }
+        if (form.scheduledIn.getTime() !== new Date(editing.scheduled_in).getTime()) {
+          patch.scheduled_in = form.scheduledIn.toISOString();
+        }
+        if (originIATA !== editing.origin_iata) patch.origin_iata = originIATA;
+        if (destIATA !== editing.dest_iata) patch.dest_iata = destIATA;
+        if (form.notes !== editing.notes) patch.notes = form.notes;
+        if (form.status !== editing.status) patch.status = form.status;
+        if (Object.keys(patch).length > 0) await updateFlight(editing.id, patch);
         const existing = new Set(editing.passenger_ids);
         const next = new Set(form.passengers.map((u) => u.id));
         for (const uid of next) if (!existing.has(uid)) await addPassenger(editing.id, uid);

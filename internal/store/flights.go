@@ -57,15 +57,18 @@ func (s *Store) FlightByID(ctx context.Context, id int64) (*Flight, error) {
 		`SELECT `+flightColumns+` FROM flights WHERE id = $1`, id))
 }
 
-// ActiveFlights returns flights whose live window is open relative to `now`.
-// The window is [scheduled_out - 30m, scheduled_in + 30m], excluding completed
-// or cancelled flights.
+// ActiveFlights returns flights worth polling: anything in a non-terminal
+// status whose departure is past (or within 30 minutes of being so). The
+// upper bound used to be scheduled_in + 30m, but that left stale flights
+// stuck Enroute if the server happened to be down during their landing —
+// instead we keep returning them until the next tick promotes them to
+// Arrived (via the stub or AeroAPI), at which point the status filter
+// drops them out.
 func (s *Store) ActiveFlights(ctx context.Context, now time.Time) ([]*Flight, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+flightColumns+` FROM flights
-		WHERE status NOT IN ('Arrived', 'Cancelled')
-		  AND $1 BETWEEN scheduled_out - INTERVAL '30 minutes'
-		             AND scheduled_in  + INTERVAL '30 minutes'
+		WHERE status NOT IN ('Arrived', 'Cancelled', 'Diverted')
+		  AND $1 >= scheduled_out - INTERVAL '30 minutes'
 		ORDER BY scheduled_out ASC`, now)
 	if err != nil {
 		return nil, err
@@ -150,6 +153,12 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 	if destIATA != nil {
 		destLat, destLon = lookupCoords(*destIATA)
 	}
+	// When the caller does NOT supply a status, derive it from the (possibly
+	// just-edited) times. Preserves terminal states the user chose explicitly
+	// in a previous edit. Without this, editing the arrival time alone would
+	// leave the status pill stale until the next poll tick — and if the new
+	// arrival is in the past, the poller drops the row from active_flights
+	// and never reconsiders it.
 	return scanFlight(s.pool.QueryRow(ctx, `
 		UPDATE flights SET
 			scheduled_out = COALESCE($2, scheduled_out),
@@ -161,8 +170,13 @@ func (s *Store) UpdateFlight(ctx context.Context, id int64, in UpdateFlightPaylo
 			dest_lat      = COALESCE($8, dest_lat),
 			dest_lon      = COALESCE($9, dest_lon),
 			notes         = COALESCE($10, notes),
-			status        = COALESCE($11, status),
-			updated_at    = NOW()
+			status = COALESCE($11, CASE
+				WHEN status IN ('Cancelled', 'Diverted') THEN status
+				WHEN NOW() > COALESCE($3, scheduled_in)  THEN 'Arrived'
+				WHEN NOW() >= COALESCE($2, scheduled_out) THEN 'Enroute'
+				ELSE 'Scheduled'
+			END),
+			updated_at = NOW()
 		WHERE id = $1
 		RETURNING `+flightColumns,
 		id, in.ScheduledOut, in.ScheduledIn,
