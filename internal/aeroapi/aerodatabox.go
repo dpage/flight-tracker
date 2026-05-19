@@ -88,7 +88,10 @@ func (a *AeroDataBox) Resolve(ctx context.Context, ident string, date time.Time)
 }
 
 func buildResolved(f *adbFlight, fallbackIdent string) *ResolvedFlight {
-	r := &ResolvedFlight{Ident: strings.ToUpper(f.Number)}
+	// AeroDataBox returns "BA 286" — split on whitespace then re-join so the
+	// canonical "BA286" form lands in the DTO regardless of the upstream's
+	// formatting.
+	r := &ResolvedFlight{Ident: strings.ToUpper(strings.Join(strings.Fields(f.Number), ""))}
 	if r.Ident == "" {
 		r.Ident = fallbackIdent
 	}

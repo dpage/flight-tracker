@@ -96,7 +96,7 @@ type CreateFlightPayload struct {
 }
 
 func (s *Store) CreateFlight(ctx context.Context, in CreateFlightPayload, createdBy int64) (*Flight, error) {
-	ident := strings.ToUpper(strings.TrimSpace(in.Ident))
+	ident := normalizeIdent(in.Ident)
 	if ident == "" {
 		return nil, errors.New("ident required")
 	}
@@ -132,6 +132,14 @@ func normalizeICAO24(s string) *string {
 		return nil
 	}
 	return &v
+}
+
+// normalizeIdent uppercases the ident and strips ALL whitespace (not just
+// leading/trailing). AeroDataBox returns idents like "BA 286"; we want
+// "BA286" so it matches the airline's display form and OpenSky callsign
+// conventions, and so the user sees a consistent string in the UI.
+func normalizeIdent(s string) string {
+	return strings.ToUpper(strings.Join(strings.Fields(s), ""))
 }
 
 // lookupCoords returns *float64 (nullable) so callers can pass it straight to
