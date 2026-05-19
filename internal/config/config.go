@@ -17,6 +17,7 @@ type Config struct {
 	OpenSkyUsername string
 	OpenSkyPassword string
 	OpenSkyEnabled  bool // true if we should query OpenSky even without creds
+	AeroDataBoxKey  string
 	PollInterval    time.Duration
 	DevAuthBypass   bool
 }
@@ -39,6 +40,7 @@ func Load() (*Config, error) {
 		OpenSkyUsername: os.Getenv("OPENSKY_USERNAME"),
 		OpenSkyPassword: os.Getenv("OPENSKY_PASSWORD"),
 		OpenSkyEnabled:  os.Getenv("OPENSKY_ENABLED") == "1",
+		AeroDataBoxKey:  os.Getenv("AERODATABOX_RAPIDAPI_KEY"),
 		PollInterval:    pollInterval,
 		DevAuthBypass:   os.Getenv("DEV_AUTH_BYPASS") == "1",
 	}
@@ -79,10 +81,9 @@ func (c *Config) UseOpenSky() bool {
 }
 
 // ResolverAvailable reports whether a Resolver is wired — i.e. whether the
-// frontend can offer the minimal "ident + date" Add Flight dialog. No
-// Resolver is implemented yet, so this is always false until one lands.
+// frontend can offer the minimal "ident + date" Add Flight dialog.
 func (c *Config) ResolverAvailable() bool {
-	return false
+	return c.AeroDataBoxKey != ""
 }
 
 func getenv(k, dflt string) string {

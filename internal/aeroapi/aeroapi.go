@@ -26,3 +26,27 @@ import (
 type Tracker interface {
 	Track(ctx context.Context, f *store.Flight, now time.Time) (*store.Position, error)
 }
+
+// ResolvedFlight is the airline-data-source view of a single scheduled
+// flight, used to autofill the Add Flight dialog from just an ident + date.
+type ResolvedFlight struct {
+	Ident        string
+	ScheduledOut time.Time
+	ScheduledIn  time.Time
+	OriginIATA   string
+	OriginLat    float64
+	OriginLon    float64
+	DestIATA     string
+	DestLat      float64
+	DestLon      float64
+	ICAO24       string // 24-bit Mode-S hex address (lowercase) when known
+	Notes        string // free-text summary — typically airline + aircraft model
+}
+
+// Resolver maps a flight number + departure date to a ResolvedFlight. The
+// concrete implementation is whatever airline-data provider the operator
+// has configured (AeroDataBox today; AeroAPI / AviationStack / FlightStats
+// could slot in here too).
+type Resolver interface {
+	Resolve(ctx context.Context, ident string, date time.Time) (*ResolvedFlight, error)
+}

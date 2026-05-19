@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/dpage/flight-tracker/internal/aeroapi"
 	"github.com/dpage/flight-tracker/internal/auth"
 	"github.com/dpage/flight-tracker/internal/config"
 	"github.com/dpage/flight-tracker/internal/sse"
@@ -14,14 +15,15 @@ import (
 )
 
 type API struct {
-	Store  *store.Store
-	Auth   *auth.Handler
-	Hub    *sse.Hub
-	Config *config.Config
+	Store    *store.Store
+	Auth     *auth.Handler
+	Hub      *sse.Hub
+	Config   *config.Config
+	Resolver aeroapi.Resolver // may be nil if no resolver is configured
 }
 
-func New(s *store.Store, a *auth.Handler, hub *sse.Hub, cfg *config.Config) *API {
-	return &API{Store: s, Auth: a, Hub: hub, Config: cfg}
+func New(s *store.Store, a *auth.Handler, hub *sse.Hub, cfg *config.Config, r aeroapi.Resolver) *API {
+	return &API{Store: s, Auth: a, Hub: hub, Config: cfg, Resolver: r}
 }
 
 // Register attaches every /api/* route. All routes require an authenticated
@@ -36,6 +38,7 @@ func (a *API) Register(mux *http.ServeMux) {
 
 	mux.Handle("GET /api/flights", req(http.HandlerFunc(a.listFlights)))
 	mux.Handle("POST /api/flights", req(http.HandlerFunc(a.createFlight)))
+	mux.Handle("POST /api/flights/resolve", req(http.HandlerFunc(a.resolveFlight)))
 	mux.Handle("GET /api/flights/{id}", req(http.HandlerFunc(a.getFlight)))
 	mux.Handle("PATCH /api/flights/{id}", req(http.HandlerFunc(a.updateFlight)))
 	mux.Handle("DELETE /api/flights/{id}", req(http.HandlerFunc(a.deleteFlight)))

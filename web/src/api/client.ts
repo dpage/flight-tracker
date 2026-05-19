@@ -3,6 +3,8 @@ import type {
   CreateFlightInput,
   Flight,
   InviteUserInput,
+  ResolveFlightInput,
+  ResolvedFlight,
   UpdateFlightInput,
   UpdateUserInput,
   User,
@@ -53,6 +55,8 @@ export const api = {
   listFlights: () => request<Flight[]>('GET', '/api/flights'),
   getFlight: (id: number) => request<Flight>('GET', `/api/flights/${id}`),
   createFlight: (input: CreateFlightInput) => request<Flight>('POST', '/api/flights', input),
+  resolveFlight: (input: ResolveFlightInput) =>
+    request<ResolvedFlight>('POST', '/api/flights/resolve', input),
   updateFlight: (id: number, patch: UpdateFlightInput) =>
     request<Flight>('PATCH', `/api/flights/${id}`, patch),
   deleteFlight: (id: number) => request<void>('DELETE', `/api/flights/${id}`),

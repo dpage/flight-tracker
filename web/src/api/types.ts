@@ -25,6 +25,26 @@ export interface Capabilities {
   resolver_available: boolean;
 }
 
+export interface ResolveFlightInput {
+  ident: string;
+  /** YYYY-MM-DD in UTC. */
+  date: string;
+}
+
+export interface ResolvedFlight {
+  ident: string;
+  scheduled_out: string;
+  scheduled_in: string;
+  origin_iata: string;
+  origin_lat: number;
+  origin_lon: number;
+  dest_iata: string;
+  dest_lat: number;
+  dest_lon: number;
+  icao24: string;
+  notes: string;
+}
+
 export type FlightStatus =
   | 'Scheduled'
   | 'Boarding'

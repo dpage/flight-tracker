@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/dpage/flight-tracker/internal/aeroapi"
 	"github.com/dpage/flight-tracker/internal/auth"
 	"github.com/dpage/flight-tracker/internal/config"
@@ -38,6 +40,12 @@ func main() {
 }
 
 func run() error {
+	// Load .env from the current working directory if present, so we don't
+	// have to depend on the shell parsing values that contain quotes, $, etc.
+	// godotenv's parser handles single-quoted values literally.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn(".env present but failed to parse", "err", err)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -59,7 +67,13 @@ func run() error {
 	s := store.New(pool)
 	authH := auth.NewHandler(cfg.GitHubID, cfg.GitHubSecret, cfg.SessionKey, cfg.PublicURL, s)
 	hub := sse.NewHub()
-	api := handlers.New(s, authH, hub, cfg)
+
+	var resolver aeroapi.Resolver
+	if cfg.AeroDataBoxKey != "" {
+		resolver = aeroapi.NewAeroDataBox(cfg.AeroDataBoxKey)
+		slog.Info("resolver: aerodatabox")
+	}
+	api := handlers.New(s, authH, hub, cfg, resolver)
 
 	// Pick the upstream tracker. OpenSky if credentials are configured (or
 	// anonymous OpenSky if requested), otherwise the in-memory stub. Either
