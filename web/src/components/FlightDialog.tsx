@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  LinearProgress,
   Link,
   Stack,
   TextField,
@@ -81,6 +82,12 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
   const [form, setForm] = useState<FormState>(emptyForm());
   const [minimal, setMinimal] = useState<MinimalState>(emptyMinimal());
   const [busy, setBusy] = useState(false);
+  // submitStatus drives the LinearProgress + caption strip across the top
+  // of the dialog while a submit is in flight. "" means idle/no progress
+  // bar. The resolver path can take several seconds (rate-limited API
+  // call + auto-retry on 429) so a visible "doing something" affordance
+  // matters here.
+  const [submitStatus, setSubmitStatus] = useState('');
   // Resolver failures used to auto-drop into the manual form, which made it
   // very easy to accidentally Create with blank IATAs. We now show the
   // failure inline and require an explicit choice (Try again / Enter
@@ -91,6 +98,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
     if (!open) return;
     setManualOverride(false);
     setResolveError(null);
+    setSubmitStatus('');
     if (editing) {
       const passengers = editing.passenger_ids
         .map((id) => users.find((u) => u.id === id))
@@ -122,6 +130,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
   const handleFullSubmit = async () => {
     if (!canSubmitFull || !form.scheduledOut || !form.scheduledIn) return;
     setBusy(true);
+    setSubmitStatus(editing ? 'Saving changes…' : 'Creating flight…');
     try {
       if (editing) {
         const patch: Parameters<typeof updateFlight>[1] = {};
@@ -163,6 +172,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setSubmitStatus('');
     }
   };
 
@@ -170,11 +180,13 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
     if (!canSubmitMinimal || !minimal.date) return;
     setBusy(true);
     setResolveError(null);
+    setSubmitStatus(`Looking up ${minimal.ident.trim().toUpperCase()}…`);
     try {
       const resolved = await api.resolveFlight({
         ident: minimal.ident.trim().toUpperCase(),
         date: formatDateOnly(minimal.date),
       });
+      setSubmitStatus(`Found ${resolved.ident} — creating flight…`);
       const input: CreateFlightInput = {
         ident: resolved.ident,
         scheduled_out: resolved.scheduled_out,
@@ -195,6 +207,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
       setResolveError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+      setSubmitStatus('');
     }
   };
 
@@ -214,6 +227,20 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{editing ? `Edit ${editing.ident}` : 'Add flight'}</DialogTitle>
+      {busy && (
+        <Box>
+          <LinearProgress />
+          {submitStatus && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', px: 3, py: 0.75 }}
+            >
+              {submitStatus}
+            </Typography>
+          )}
+        </Box>
+      )}
       <DialogContent dividers>
         {useMinimal ? (
           <Stack spacing={2} sx={{ pt: 1 }}>

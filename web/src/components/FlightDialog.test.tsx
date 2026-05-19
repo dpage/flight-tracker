@@ -288,6 +288,42 @@ describe('FlightDialog - minimal form', () => {
     expect(await screen.findByText(/strerr/)).toBeInTheDocument();
     expect(h.state.setError).not.toHaveBeenCalled();
   });
+
+  // The resolver call sits behind a 1 req/sec rate-limiter so a real
+  // lookup can take a second or two. The dialog has to make that visible —
+  // a LinearProgress strip plus a caption naming the current phase. We
+  // hold the resolver promise open here to assert the in-flight state.
+  it('shows a progress strip and status text while resolving', async () => {
+    let release: (v: unknown) => void = () => {};
+    h.api.resolveFlight.mockReturnValue(
+      new Promise((res) => {
+        release = res;
+      }),
+    );
+    render(<FlightDialog open editId={null} onClose={vi.fn()} />);
+    await userEvent.type(screen.getByLabelText(/^Flight number/), 'ba286');
+    await userEvent.click(screen.getByRole('button', { name: 'Look up & add' }));
+
+    // Mid-flight: status caption is visible, submit button is disabled.
+    expect(await screen.findByText(/Looking up BA286/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Look up & add' })).toBeDisabled();
+
+    // Resolve the API and let the dialog close.
+    release({
+      ident: 'BA286',
+      scheduled_out: '2024-02-01T10:00:00Z',
+      scheduled_in: '2024-02-01T12:00:00Z',
+      origin_iata: 'LHR',
+      origin_lat: 1,
+      origin_lon: 2,
+      dest_iata: 'JFK',
+      dest_lat: 3,
+      dest_lon: 4,
+      icao24: '',
+      notes: '',
+    });
+    h.state.createFlight.mockResolvedValue(undefined);
+  });
 });
 
 describe('FlightDialog - editing', () => {
