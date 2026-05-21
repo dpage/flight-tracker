@@ -18,6 +18,8 @@ vi.mock('../api/client', async () => {
       deleteFlight: vi.fn(),
       addPassenger: vi.fn(),
       removePassenger: vi.fn(),
+      addShare: vi.fn(),
+      removeShare: vi.fn(),
       listUsers: vi.fn(),
       inviteUser: vi.fn(),
       updateUser: vi.fn(),
@@ -219,6 +221,73 @@ describe('flight mutations', () => {
     mockApi.getFlight.mockResolvedValue(flight({ id: 1, passenger_ids: [] }));
     await useStore.getState().removePassenger(1, 9);
     expect(useStore.getState().flights[0].passenger_ids).toEqual([]);
+  });
+
+  it('addShare refetches the flight after the share is added', async () => {
+    useStore.setState({ flights: [flight({ id: 1 })] });
+    mockApi.addShare.mockResolvedValue(undefined);
+    mockApi.getFlight.mockResolvedValue(flight({ id: 1, ident: 'AFTER-ADD' }));
+    await useStore.getState().addShare(1, 42);
+    expect(mockApi.addShare).toHaveBeenCalledWith(1, 42);
+    expect(useStore.getState().flights[0].ident).toBe('AFTER-ADD');
+  });
+
+  it('removeShare refetches the flight after the share is removed', async () => {
+    useStore.setState({ flights: [flight({ id: 1 })] });
+    mockApi.removeShare.mockResolvedValue(undefined);
+    mockApi.getFlight.mockResolvedValue(flight({ id: 1, ident: 'AFTER-REMOVE' }));
+    await useStore.getState().removeShare(1, 42);
+    expect(mockApi.removeShare).toHaveBeenCalledWith(1, 42);
+    expect(useStore.getState().flights[0].ident).toBe('AFTER-REMOVE');
+  });
+});
+
+describe('setShowAll', () => {
+  // Node 25 ships a built-in localStorage global that shadows jsdom's working
+  // implementation with a methodless stub; vitest @ Node 22 in CI doesn't hit
+  // this. Install a fresh in-memory localStorage on window before each test so
+  // the suite is portable across both.
+  let store: Record<string, string>;
+
+  beforeEach(() => {
+    store = {};
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => (k in store ? store[k] : null),
+        setItem: (k: string, v: string) => {
+          store[k] = String(v);
+        },
+        removeItem: (k: string) => {
+          delete store[k];
+        },
+        clear: () => {
+          store = {};
+        },
+        key: (i: number) => Object.keys(store)[i] ?? null,
+        get length() {
+          return Object.keys(store).length;
+        },
+      },
+    });
+  });
+
+  it('persists true to localStorage and refetches flights with showAll', async () => {
+    mockApi.listFlights.mockResolvedValue([flight({ id: 99 })]);
+    await useStore.getState().setShowAll(true);
+    expect(window.localStorage.getItem('ft.show_all')).toBe('1');
+    expect(useStore.getState().showAll).toBe(true);
+    expect(mockApi.listFlights).toHaveBeenCalledWith({ showAll: true });
+    expect(useStore.getState().flights.map((f) => f.id)).toEqual([99]);
+  });
+
+  it('persists false by removing the localStorage entry', async () => {
+    window.localStorage.setItem('ft.show_all', '1');
+    mockApi.listFlights.mockResolvedValue([]);
+    await useStore.getState().setShowAll(false);
+    expect(window.localStorage.getItem('ft.show_all')).toBeNull();
+    expect(useStore.getState().showAll).toBe(false);
+    expect(mockApi.listFlights).toHaveBeenCalledWith({ showAll: false });
   });
 });
 

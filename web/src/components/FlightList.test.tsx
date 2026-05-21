@@ -281,4 +281,96 @@ describe('FlightList', () => {
     // No timezone known → both ends rendered as UTC with explicit suffix.
     expect(screen.getByText(/10:00 UTC.*→.*14:00 UTC/)).toBeInTheDocument();
   });
+
+  it('detail panel shows the icao24 hex code in a mono span', () => {
+    state.flights = [flight({ id: 5, icao24: 'A1B2C3' })];
+    state.selectedFlightId = 5;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const panel = screen.getByTestId('flight-detail-panel');
+    expect(panel).toHaveTextContent('A1B2C3');
+  });
+
+  it('detail panel shows a UTC subtitle beneath each localized time', () => {
+    state.flights = [
+      flight({
+        id: 5,
+        scheduled_out: '2024-07-01T10:00:00Z',
+        scheduled_in: '2024-07-01T14:00:00Z',
+        origin_tz: 'Europe/London',
+        dest_tz: 'America/New_York',
+      }),
+    ];
+    state.selectedFlightId = 5;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const panel = screen.getByTestId('flight-detail-panel');
+    // The detail panel's TimeRow renders the UTC subtitle only when tz is set.
+    expect(panel).toHaveTextContent(/10:00 UTC/);
+    expect(panel).toHaveTextContent(/14:00 UTC/);
+  });
+
+  it('detail panel renders an "estimated" chip when the latest fix is dead-reckoned', () => {
+    state.flights = [
+      flight({
+        id: 5,
+        latest_position: {
+          ts: '2024-01-01T10:00:00Z',
+          lat: 0,
+          lon: 0,
+          altitude_ft: 10000,
+          groundspeed_kt: 400,
+          heading_deg: 90,
+          is_estimated: true,
+        },
+      }),
+    ];
+    state.selectedFlightId = 5;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const panel = screen.getByTestId('flight-detail-panel');
+    expect(within(panel).getByText(/estimated/i)).toBeInTheDocument();
+  });
+
+  it('detail panel shows passengers and owner chips when set', () => {
+    state.users = [
+      user({ id: 11, github_login: 'alice' }),
+      user({ id: 22, github_login: 'bob' }),
+    ];
+    state.flights = [flight({ id: 5, passenger_ids: [11], created_by: 22 })];
+    state.selectedFlightId = 5;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const panel = screen.getByTestId('flight-detail-panel');
+    expect(panel).toHaveTextContent('Passengers');
+    expect(panel).toHaveTextContent('alice');
+    expect(panel).toHaveTextContent('Added by');
+    expect(panel).toHaveTextContent('bob');
+  });
+
+  it('detail panel renders a stale fix with missing altitude/speed/heading', () => {
+    // pos.ts older than 5 minutes → fixIsStale=true (warning-coloured Fix age).
+    // altitude/groundspeed/heading null → each Row collapses.
+    state.flights = [
+      flight({
+        id: 5,
+        latest_position: {
+          ts: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+          lat: 0,
+          lon: 0,
+          altitude_ft: undefined,
+          groundspeed_kt: undefined,
+          heading_deg: undefined,
+          is_estimated: false,
+        },
+        last_polled_at: new Date(Date.now() - 30 * 1000).toISOString(),
+      }),
+    ];
+    state.selectedFlightId = 5;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const panel = screen.getByTestId('flight-detail-panel');
+    expect(panel).toHaveTextContent('Fix age');
+    expect(panel).not.toHaveTextContent('Altitude');
+    expect(panel).not.toHaveTextContent('Groundspeed');
+    expect(panel).not.toHaveTextContent('Heading');
+    // last_polled_at set → "Last polled" row shows a relative duration, not "never".
+    expect(panel).toHaveTextContent(/Last polled/);
+    expect(panel).not.toHaveTextContent(/never/);
+  });
 });
