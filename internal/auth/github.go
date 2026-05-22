@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	gitHubAuthURL    = "https://github.com/login/oauth/authorize"
-	gitHubTokenURL   = "https://github.com/login/oauth/access_token"
-	gitHubUserAPIURL = "https://api.github.com/user"
+	gitHubAuthURL      = "https://github.com/login/oauth/authorize"
+	gitHubTokenURL     = "https://github.com/login/oauth/access_token"
+	gitHubUserAPIURL   = "https://api.github.com/user"
+	gitHubEmailsAPIURL = "https://api.github.com/user/emails"
 )
 
 // Handler wires the GitHub OAuth flow against a Store.
@@ -75,7 +76,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	q := url.Values{}
 	q.Set("client_id", h.ClientID)
 	q.Set("redirect_uri", h.redirectURL())
-	q.Set("scope", "read:user")
+	q.Set("scope", "read:user user:email")
 	q.Set("state", state)
 	http.Redirect(w, r, gitHubAuthURL+"?"+q.Encode(), http.StatusFound)
 }
@@ -123,6 +124,13 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		slog.Error("github profile fetch failed", "err", err)
 		renderLoginError(w, "could not fetch GitHub profile")
 		return
+	}
+	if email, eerr := h.fetchPrimaryEmail(r.Context(), token); eerr != nil {
+		// Tolerated: sign-in continues without an email. The user just
+		// can't use the forwarded-email ingest until they add one.
+		slog.Warn("fetch primary email failed", "err", eerr)
+	} else {
+		profile.Email = email
 	}
 
 	count, err := h.Store.CountUsers(r.Context())
@@ -224,6 +232,43 @@ func (h *Handler) fetchProfile(ctx context.Context, token string) (store.GitHubP
 	return store.GitHubProfile{
 		ID: u.ID, Login: u.Login, Name: u.Name, AvatarURL: u.AvatarURL,
 	}, nil
+}
+
+// fetchPrimaryEmail returns the user's primary verified GitHub email, or
+// "" if none is set / GitHub returned an empty list. An error is returned
+// only on transport or decode failures.
+func (h *Handler) fetchPrimaryEmail(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", gitHubEmailsAPIURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "flight-tracker")
+
+	resp, err := h.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", fmt.Errorf("/user/emails %d: %s", resp.StatusCode, body)
+	}
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&emails); err != nil {
+		return "", err
+	}
+	for _, e := range emails {
+		if e.Primary && e.Verified {
+			return e.Email, nil
+		}
+	}
+	return "", nil
 }
 
 func randomToken(n int) string {

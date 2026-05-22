@@ -20,6 +20,8 @@ import (
 	"github.com/dpage/flight-tracker/internal/auth"
 	"github.com/dpage/flight-tracker/internal/config"
 	"github.com/dpage/flight-tracker/internal/db"
+	"github.com/dpage/flight-tracker/internal/emailingest"
+	"github.com/dpage/flight-tracker/internal/flightops"
 	"github.com/dpage/flight-tracker/internal/handlers"
 	"github.com/dpage/flight-tracker/internal/poller"
 	"github.com/dpage/flight-tracker/internal/providers"
@@ -99,6 +101,39 @@ func run() error {
 	// on flights that were added manually with blanks.
 	p.Resolver = resolver
 	go p.Run(rootCtx)
+
+	if cfg.EmailIngestEnabled {
+		if resolver == nil {
+			return errors.New("EMAIL_INGEST_ENABLED=1 requires a configured resolver (set AERODATABOX_RAPIDAPI_KEY)")
+		}
+		llmClient, err := emailingest.NewRealLLM(cfg.LLMProvider, cfg.LLMModel, cfg.LLMAPIKey)
+		if err != nil {
+			return err
+		}
+		svc := &emailingest.Service{
+			Cfg: emailingest.Config{
+				MaildirPath:   cfg.EmailIngestMaildir,
+				PollInterval:  cfg.EmailIngestPollInterval,
+				RequireDKIM:   cfg.EmailIngestRequireDKIM,
+				MaxBodyBytes:  cfg.EmailIngestMaxBodyBytes,
+				IngestAddress: cfg.EmailIngestAddress,
+				SendmailPath:  cfg.EmailIngestSendmail,
+				PublicURL:     cfg.PublicURL,
+			},
+			Store:      s,
+			Extractor:  emailingest.NewExtractor(llmClient, cfg.LLMModel),
+			FlightDeps: flightops.Deps{Store: s, Resolver: resolver},
+		}
+		go func() {
+			if err := svc.Run(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("emailingest: stopped", "err", err)
+			}
+		}()
+		slog.Info("emailingest: started",
+			"maildir", cfg.EmailIngestMaildir,
+			"address", cfg.EmailIngestAddress,
+			"llm", cfg.LLMProvider+"/"+cfg.LLMModel)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

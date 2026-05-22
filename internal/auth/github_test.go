@@ -22,10 +22,12 @@ func (rt rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type ghServerOpts struct {
-	tokenStatus int
-	tokenBody   string
-	userStatus  int
-	userBody    string
+	tokenStatus  int
+	tokenBody    string
+	userStatus   int
+	userBody     string
+	emailsStatus int
+	emailsBody   string
 }
 
 func ghServer(t *testing.T, o ghServerOpts) *httptest.Server {
@@ -40,6 +42,17 @@ func ghServer(t *testing.T, o ghServerOpts) *httptest.Server {
 			o.tokenBody = `{"access_token":"tok123"}`
 		}
 		_, _ = w.Write([]byte(o.tokenBody))
+	})
+	mux.HandleFunc("/user/emails", func(w http.ResponseWriter, _ *http.Request) {
+		if o.emailsStatus == 0 {
+			o.emailsStatus = 200
+		}
+		w.WriteHeader(o.emailsStatus)
+		if o.emailsBody == "" {
+			o.emailsBody = `[{"email":"octo@example.com","primary":true,"verified":true},
+				{"email":"other@example.com","primary":false,"verified":true}]`
+		}
+		_, _ = w.Write([]byte(o.emailsBody))
 	})
 	mux.HandleFunc("/user", func(w http.ResponseWriter, _ *http.Request) {
 		if o.userStatus == 0 {
@@ -100,6 +113,11 @@ func TestLoginSetsStateCookieAndRedirects(t *testing.T) {
 	if !strings.HasPrefix(loc, gitHubAuthURL) || !strings.Contains(loc, "state=") {
 		t.Errorf("bad redirect location: %s", loc)
 	}
+	// Scope must include user:email so the email-ingest feature can match
+	// inbound forwarded mail to the signed-in user.
+	if !strings.Contains(loc, "user%3Aemail") {
+		t.Errorf("scope missing user:email: %s", loc)
+	}
 	var found bool
 	for _, c := range res.Cookies() {
 		if c.Name == StateCookie {
@@ -108,6 +126,65 @@ func TestLoginSetsStateCookieAndRedirects(t *testing.T) {
 	}
 	if !found {
 		t.Error("state cookie not set")
+	}
+}
+
+func TestFetchPrimaryEmailSuccess(t *testing.T) {
+	h, _ := newTestHandler(t)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
+	got, err := h.fetchPrimaryEmail(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("fetchPrimaryEmail: %v", err)
+	}
+	if got != "octo@example.com" {
+		t.Errorf("got %q, want octo@example.com", got)
+	}
+}
+
+func TestFetchPrimaryEmail_NoPrimary(t *testing.T) {
+	h, _ := newTestHandler(t)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsBody: `[{"email":"x@x","primary":false,"verified":true}]`}))
+	got, err := h.fetchPrimaryEmail(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestFetchPrimaryEmail_HTTPError(t *testing.T) {
+	h, _ := newTestHandler(t)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsStatus: 401, emailsBody: "nope"}))
+	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+		t.Error("expected error for 401")
+	}
+}
+
+func TestFetchPrimaryEmail_BadJSON(t *testing.T) {
+	h, _ := newTestHandler(t)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsBody: "not json"}))
+	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+		t.Error("expected JSON decode error")
+	}
+}
+
+func TestFetchPrimaryEmail_TransportError(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.HTTP = &http.Client{Transport: errTransport{}}
+	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+		t.Error("expected transport error")
+	}
+}
+
+func TestCallbackToleratesEmailFetchFailure(t *testing.T) {
+	h, _ := newTestHandler(t)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsStatus: 500}))
+	c, state := stateCookie(h, false)
+	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	res := w.Result()
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/" {
+		t.Fatalf("expected redirect to /, got %d", res.StatusCode)
 	}
 }
 

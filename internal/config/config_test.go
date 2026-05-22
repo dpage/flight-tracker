@@ -171,3 +171,118 @@ func TestResolverAvailable(t *testing.T) {
 		t.Error("ResolverAvailable should be true with key")
 	}
 }
+
+func emailIngestBase(t *testing.T) {
+	t.Helper()
+	base(t)
+	t.Setenv("EMAIL_INGEST_ENABLED", "1")
+	t.Setenv("EMAIL_INGEST_MAILDIR", "/var/spool/flight-tracker/Maildir")
+	t.Setenv("EMAIL_INGEST_ADDRESS", "flights@flights.example")
+	t.Setenv("LLM_API_KEY", "sk-test")
+}
+
+func TestLoadEmailIngestDisabled(t *testing.T) {
+	base(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EmailIngestEnabled {
+		t.Error("expected EmailIngestEnabled false by default")
+	}
+}
+
+func TestLoadEmailIngestEnabledDefaults(t *testing.T) {
+	emailIngestBase(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.EmailIngestEnabled {
+		t.Error("expected EmailIngestEnabled true")
+	}
+	if cfg.EmailIngestPollInterval != 30*time.Second {
+		t.Errorf("default poll = %v", cfg.EmailIngestPollInterval)
+	}
+	if !cfg.EmailIngestRequireDKIM {
+		t.Error("RequireDKIM should default to true")
+	}
+	if cfg.EmailIngestMaxBodyBytes != 1<<20 {
+		t.Errorf("default max body = %d", cfg.EmailIngestMaxBodyBytes)
+	}
+	if cfg.EmailIngestSendmail != "/usr/sbin/sendmail" {
+		t.Errorf("default sendmail = %q", cfg.EmailIngestSendmail)
+	}
+	if cfg.LLMProvider != "anthropic" || cfg.LLMModel != "claude-haiku-4-5" {
+		t.Errorf("default llm = %s/%s", cfg.LLMProvider, cfg.LLMModel)
+	}
+}
+
+func TestLoadEmailIngestMissingRequired(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("EMAIL_INGEST_MAILDIR", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "EMAIL_INGEST_MAILDIR") {
+		t.Errorf("expected MAILDIR required error, got %v", err)
+	}
+}
+
+func TestLoadEmailIngestBadPollInterval(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("EMAIL_INGEST_POLL_INTERVAL", "garbage")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "EMAIL_INGEST_POLL_INTERVAL") {
+		t.Errorf("expected POLL_INTERVAL error, got %v", err)
+	}
+}
+
+func TestLoadEmailIngestBadMaxBytes(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("EMAIL_INGEST_MAX_BODY_BYTES", "0")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MAX_BODY_BYTES") {
+		t.Errorf("expected MAX_BODY_BYTES error, got %v", err)
+	}
+}
+
+func TestLoadEmailIngestRequiresLLMKey(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("LLM_API_KEY", "")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "LLM_API_KEY") {
+		t.Errorf("expected LLM_API_KEY error, got %v", err)
+	}
+}
+
+func TestLoadEmailIngestOllamaSkipsAPIKey(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("LLM_API_KEY", "")
+	t.Setenv("LLM_PROVIDER", "ollama")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected ollama to skip API key check, got %v", err)
+	}
+	if cfg.LLMProvider != "ollama" {
+		t.Errorf("LLMProvider = %q", cfg.LLMProvider)
+	}
+}
+
+func TestLoadEmailIngestCustomMaxBytes(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("EMAIL_INGEST_MAX_BODY_BYTES", "65536")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.EmailIngestMaxBodyBytes != 65536 {
+		t.Errorf("MaxBodyBytes = %d", cfg.EmailIngestMaxBodyBytes)
+	}
+}
+
+func TestLoadEmailIngestRequireDKIMOff(t *testing.T) {
+	emailIngestBase(t)
+	t.Setenv("EMAIL_INGEST_REQUIRE_DKIM", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EmailIngestRequireDKIM {
+		t.Error("RequireDKIM should be false when env=0")
+	}
+}

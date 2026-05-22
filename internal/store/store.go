@@ -65,3 +65,30 @@ type Position struct {
 	HeadingDeg    *int16
 	IsEstimated   bool
 }
+
+// UserEmail is a verified or pending email address belonging to a user.
+type UserEmail struct {
+	ID           int64
+	UserID       int64
+	Address      string
+	Verified     bool
+	VerifyToken  *string
+	VerifySentAt *time.Time
+	VerifiedAt   *time.Time
+	CreatedAt    time.Time
+}
+
+// EmailIngest records the outcome of processing one forwarded email.
+type EmailIngest struct {
+	ID            int64
+	ReceivedAt    time.Time
+	MessageID     *string
+	FromAddress   string
+	Subject       string
+	DKIMPass      bool
+	UserID        *int64
+	Status        string
+	FlightsAdded  int
+	FlightsFailed int
+	Error         string
+}

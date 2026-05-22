@@ -168,6 +168,51 @@ func TestLinkLoginInactiveRejected(t *testing.T) {
 	}
 }
 
+func TestLinkLoginUpsertsEmail_Bootstrap(t *testing.T) {
+	s := newStore(t)
+	u, err := s.LinkLogin(ctx,
+		GitHubProfile{ID: 5005, Login: "first", Email: "first@example.com"}, true)
+	if err != nil {
+		t.Fatalf("LinkLogin: %v", err)
+	}
+	got, err := s.UserByVerifiedEmail(ctx, "first@example.com")
+	if err != nil {
+		t.Fatalf("UserByVerifiedEmail: %v", err)
+	}
+	if got.ID != u.ID {
+		t.Errorf("verified email links to user %d, want %d", got.ID, u.ID)
+	}
+}
+
+func TestLinkLoginUpsertsEmail_ExistingUser(t *testing.T) {
+	s := newStore(t)
+	// First login bootstraps without an email.
+	u, _ := s.LinkLogin(ctx, GitHubProfile{ID: 6006, Login: "later"}, true)
+	if emails, _ := s.EmailsByUser(ctx, u.ID); len(emails) != 0 {
+		t.Fatalf("expected no emails initially, got %d", len(emails))
+	}
+	// Second login carries an email; it should land in user_emails.
+	_, err := s.LinkLogin(ctx, GitHubProfile{ID: 6006, Login: "later", Email: "later@example.com"}, false)
+	if err != nil {
+		t.Fatalf("second LinkLogin: %v", err)
+	}
+	if _, err := s.UserByVerifiedEmail(ctx, "later@example.com"); err != nil {
+		t.Errorf("email not upserted on second login: %v", err)
+	}
+}
+
+func TestLinkLoginEmptyEmailIsNoop(t *testing.T) {
+	s := newStore(t)
+	u, err := s.LinkLogin(ctx, GitHubProfile{ID: 7007, Login: "noemail"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emails, _ := s.EmailsByUser(ctx, u.ID)
+	if len(emails) != 0 {
+		t.Errorf("empty email should be a no-op, got %d rows", len(emails))
+	}
+}
+
 func TestLinkLoginKnownInactiveRejected(t *testing.T) {
 	s := newStore(t)
 	// Link once (creates github_id row), then deactivate, then re-login.

@@ -117,11 +117,31 @@ func (s *Store) CountUsers(ctx context.Context) (int64, error) {
 }
 
 // GitHubProfile is the subset of /user GitHub returns that we persist.
+// Email is the primary verified email from /user/emails; empty if none.
 type GitHubProfile struct {
 	ID        int64
 	Login     string
 	Name      string
 	AvatarURL string
+	Email     string
+}
+
+// upsertEmailTx upserts a verified email row for userID inside the given
+// transaction. No-op when address is empty (e.g. user hides their email on
+// GitHub).
+func upsertEmailTx(ctx context.Context, tx pgx.Tx, userID int64, address string) error {
+	addr := strings.TrimSpace(address)
+	if addr == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO user_emails (user_id, address, verified, verified_at)
+		VALUES ($1, $2, TRUE, NOW())
+		ON CONFLICT (lower(address)) DO UPDATE
+		SET verified = TRUE, verified_at = NOW(), verify_token = NULL
+		WHERE user_emails.user_id = EXCLUDED.user_id`,
+		userID, addr)
+	return err
 }
 
 // LinkLogin records a successful GitHub sign-in. It looks up the user by
@@ -166,6 +186,9 @@ func (s *Store) LinkLogin(ctx context.Context, p GitHubProfile, bootstrapAsSuper
 			if err != nil {
 				return nil, err
 			}
+			if err := upsertEmailTx(ctx, tx, u.ID, p.Email); err != nil {
+				return nil, err
+			}
 			if err := tx.Commit(ctx); err != nil {
 				return nil, err
 			}
@@ -196,6 +219,9 @@ func (s *Store) LinkLogin(ctx context.Context, p GitHubProfile, bootstrapAsSuper
 	).Scan(&u.ID, &u.GitHubID, &u.GitHubLogin, &u.Name, &u.AvatarURL,
 		&u.IsSuperuser, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
+		return nil, err
+	}
+	if err := upsertEmailTx(ctx, tx, u.ID, p.Email); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

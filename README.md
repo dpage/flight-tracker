@@ -65,6 +65,80 @@ All configuration is via environment variables (see `.env.example`).
 
 Database migrations are applied automatically on every startup from the embedded `migrations/` directory.
 
+## Email-forwarded flight ingest (optional)
+
+When enabled, users can add flights by forwarding the confirmation email
+from their airline or travel agent to a configured address. The server
+extracts the flight(s) with an LLM and creates them automatically. v1
+matches the forwarder by the email GitHub reports as their **primary,
+verified** address on sign-in.
+
+### How it works
+
+1. Postfix on the host delivers `flights@<your host>` to a Maildir owned
+   by the service account.
+2. The server watches the Maildir; for each new message it:
+   - Looks up the sender by `From:` against the user's verified email
+     addresses (the one fetched from GitHub OAuth at sign-in).
+   - Requires a DKIM pass on the sender's domain (configurable).
+   - Sends the body, HTML, and any PDF text to the configured LLM with a
+     strict JSON schema asking for `{ident, date}` per leg.
+   - Resolves each leg via the existing flight resolver and creates the
+     flight with the forwarder as the sole passenger.
+3. The server replies with a summary of what was added or skipped. If the
+   sender isn't recognised or DKIM fails, the message is moved to a
+   `.failed/` Maildir subdirectory and **no reply is sent** (we don't
+   want to confirm to a potential spoofer that the address is live).
+
+### Host setup
+
+Postfix:
+
+```text
+# /etc/aliases (or your virtual map equivalent)
+flights: flight-tracker
+# Then:
+newaliases
+```
+
+The `flight-tracker` local user must own a Maildir at the configured
+path. opendkim (or equivalent) must be in postfix's `smtpd_milters`
+chain and must stamp `Authentication-Results:` headers on inbound mail,
+otherwise `EMAIL_INGEST_REQUIRE_DKIM=1` will reject every message.
+
+### Configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `EMAIL_INGEST_ENABLED` | `0` | Master switch. |
+| `EMAIL_INGEST_MAILDIR` | (required if enabled) | Maildir path. |
+| `EMAIL_INGEST_ADDRESS` | (required if enabled) | Address users forward to. |
+| `EMAIL_INGEST_POLL_INTERVAL` | `30s` | Maildir scan cadence. |
+| `EMAIL_INGEST_REQUIRE_DKIM` | `1` | Require DKIM pass for the sender's domain. |
+| `EMAIL_INGEST_MAX_BODY_BYTES` | `1048576` | Truncation guard before LLM call. |
+| `EMAIL_INGEST_SENDMAIL` | `/usr/sbin/sendmail` | Path used for reply mail. |
+| `LLM_PROVIDER` | `anthropic` | One of `anthropic` / `openai` / `gemini` / `ollama`. |
+| `LLM_MODEL` | `claude-haiku-4-5` | Model ID. |
+| `LLM_API_KEY` | (required unless `ollama`) | Provider API key. |
+
+`EMAIL_INGEST_ENABLED=1` requires `AERODATABOX_RAPIDAPI_KEY` (the
+resolver is what turns `{ident, date}` into a full flight record).
+
+### Limitations
+
+- v1 only matches the sender against their **GitHub primary email**.
+  A UI for adding secondary addresses (with click-through verification)
+  is on the roadmap; the schema already accommodates it.
+- PDF text extraction uses [`ledongthuc/pdf`][lpdf]. Image-only PDFs
+  (i.e. scans) won't extract text and the flight falls through to a
+  "please add manually" reply. Native PDF passthrough to the model is
+  [tracked upstream][pdf-issue].
+- The `.failed/` directory accumulates poisonous messages; the operator
+  decides when to inspect and delete.
+
+[lpdf]: https://github.com/ledongthuc/pdf
+[pdf-issue]: https://github.com/pgEdge/pgedge-go-llm-lib/issues/1
+
 ## Tracker and resolver modes
 
 The tracker decides where the poller gets a position for each flight; the resolver fills in the rest of a flight's metadata at creation time.

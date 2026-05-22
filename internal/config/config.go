@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,6 +21,20 @@ type Config struct {
 	AeroDataBoxKey  string
 	PollInterval    time.Duration
 	DevAuthBypass   bool
+
+	// Email ingest (optional). All EmailIngest* fields are zero when
+	// EmailIngestEnabled is false. When enabled, the rest are populated
+	// from env vars with the defaults documented in README.
+	EmailIngestEnabled      bool
+	EmailIngestMaildir      string
+	EmailIngestAddress      string
+	EmailIngestPollInterval time.Duration
+	EmailIngestRequireDKIM  bool
+	EmailIngestMaxBodyBytes int
+	EmailIngestSendmail     string
+	LLMProvider             string
+	LLMModel                string
+	LLMAPIKey               string
 }
 
 func Load() (*Config, error) {
@@ -69,6 +84,36 @@ func Load() (*Config, error) {
 	if cfg.DevAuthBypass && !strings.HasPrefix(cfg.PublicURL, "http://localhost") &&
 		!strings.HasPrefix(cfg.PublicURL, "http://127.0.0.1") {
 		return nil, fmt.Errorf("DEV_AUTH_BYPASS may only be used with a localhost PUBLIC_URL (got %q)", cfg.PublicURL)
+	}
+
+	cfg.EmailIngestEnabled = os.Getenv("EMAIL_INGEST_ENABLED") == "1"
+	if cfg.EmailIngestEnabled {
+		cfg.EmailIngestMaildir = os.Getenv("EMAIL_INGEST_MAILDIR")
+		cfg.EmailIngestAddress = os.Getenv("EMAIL_INGEST_ADDRESS")
+		if cfg.EmailIngestMaildir == "" || cfg.EmailIngestAddress == "" {
+			return nil, fmt.Errorf("EMAIL_INGEST_ENABLED=1 requires EMAIL_INGEST_MAILDIR and EMAIL_INGEST_ADDRESS")
+		}
+		pi, err := time.ParseDuration(getenv("EMAIL_INGEST_POLL_INTERVAL", "30s"))
+		if err != nil || pi <= 0 {
+			return nil, fmt.Errorf("EMAIL_INGEST_POLL_INTERVAL must be a positive duration")
+		}
+		cfg.EmailIngestPollInterval = pi
+		cfg.EmailIngestRequireDKIM = getenv("EMAIL_INGEST_REQUIRE_DKIM", "1") == "1"
+		cfg.EmailIngestMaxBodyBytes = 1 << 20
+		if v := os.Getenv("EMAIL_INGEST_MAX_BODY_BYTES"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("EMAIL_INGEST_MAX_BODY_BYTES must be a positive integer")
+			}
+			cfg.EmailIngestMaxBodyBytes = n
+		}
+		cfg.EmailIngestSendmail = getenv("EMAIL_INGEST_SENDMAIL", "/usr/sbin/sendmail")
+		cfg.LLMProvider = getenv("LLM_PROVIDER", "anthropic")
+		cfg.LLMModel = getenv("LLM_MODEL", "claude-haiku-4-5")
+		cfg.LLMAPIKey = os.Getenv("LLM_API_KEY")
+		if cfg.LLMProvider != "ollama" && cfg.LLMAPIKey == "" {
+			return nil, fmt.Errorf("LLM_API_KEY required when EMAIL_INGEST_ENABLED=1 and LLM_PROVIDER != ollama")
+		}
 	}
 	return cfg, nil
 }
