@@ -244,6 +244,75 @@ func TestIngest_ResolverError_PartialAllFailed(t *testing.T) {
 	}
 }
 
+func TestIngest_ResolverUnscheduled_ManualFallback(t *testing.T) {
+	// LLM extracts a leg with full manual details. Resolver reports the
+	// flight is unscheduled. We should insert it manually and tell the
+	// user to verify times.
+	depDate := time.Now().AddDate(0, 1, 0).Format("2006-01-02")
+	arrDate := time.Now().AddDate(0, 1, 0).AddDate(0, 0, 1).Format("2006-01-02")
+	llmResp := `{"flights":[{
+		"ident":"TK1980","date":"` + depDate + `","confidence":"high",
+		"origin_iata":"IST","dest_iata":"LHR",
+		"depart_time":"22:30","arrive_date":"` + arrDate + `","arrive_time":"01:15"
+	}]}`
+	h := newHarness(t, llmResp, providers.ErrFlightUnscheduled, false)
+	ctx := context.Background()
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	writeMessage(t, h.maildir, "10", goodMessage)
+	state := h.runUntilProcessed(t, "10", 5*time.Second)
+	if state != "removed" {
+		t.Fatalf("expected removed, got %s", state)
+	}
+	body, _ := os.ReadFile(h.sendmailOut)
+	bs := string(body)
+	if !strings.Contains(bs, "TK1980 on "+depDate+" (from the email") {
+		t.Errorf("expected manual-fallback note in reply, got:\n%s", bs)
+	}
+	if !strings.Contains(bs, "please check the departure and arrival times") {
+		t.Errorf("expected manual trailer in reply, got:\n%s", bs)
+	}
+	// The flight should be in the DB attached to alice.
+	flights, err := h.store.ListVisibleFlights(ctx, u.ID, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(flights) != 1 {
+		t.Fatalf("expected 1 flight in DB, got %d", len(flights))
+	}
+	if flights[0].Ident != "TK1980" || flights[0].OriginIATA != "IST" || flights[0].DestIATA != "LHR" {
+		t.Errorf("flight wrong: %+v", flights[0])
+	}
+}
+
+func TestIngest_ResolverUnscheduled_NoManualDetails_Failure(t *testing.T) {
+	// Resolver fails AND the LLM didn't extract manual details — we
+	// fall through to the original failure path rather than guessing.
+	depDate := time.Now().AddDate(0, 1, 0).Format("2006-01-02")
+	llmResp := `{"flights":[{"ident":"TK1980","date":"` + depDate + `","confidence":"high"}]}`
+	h := newHarness(t, llmResp, providers.ErrFlightUnscheduled, false)
+	ctx := context.Background()
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	writeMessage(t, h.maildir, "11", goodMessage)
+	state := h.runUntilProcessed(t, "11", 5*time.Second)
+	if state != "removed" {
+		t.Fatalf("expected removed, got %s", state)
+	}
+	body, _ := os.ReadFile(h.sendmailOut)
+	if !strings.Contains(string(body), "couldn't add any") {
+		t.Errorf("expected all-failed reply when no manual details, got:\n%s", body)
+	}
+	flights, _ := h.store.ListVisibleFlights(ctx, u.ID, false, false)
+	if len(flights) != 0 {
+		t.Errorf("expected 0 flights when no manual fallback possible, got %d", len(flights))
+	}
+}
+
 func TestIngest_MalformedMessage_Poison(t *testing.T) {
 	h := newHarness(t, `{"flights":[]}`, nil, false)
 	writeMessage(t, h.maildir, "7", "not an email at all")

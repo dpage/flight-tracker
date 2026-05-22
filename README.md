@@ -82,11 +82,17 @@ verified** address on sign-in.
      addresses (the one fetched from GitHub OAuth at sign-in).
    - Requires a DKIM pass on the sender's domain (configurable).
    - Sends the body and HTML to the configured LLM with a strict JSON
-     schema asking for `{ident, date}` per leg. Any attached PDFs are
-     passed as native document blocks (provider must support documents —
-     see "PDF attachments" below).
+     schema asking for `{ident, date}` per leg plus the schedule
+     details (origin/dest IATA, departure/arrival local date+time) when
+     the email contains them. Any attached PDFs are passed as native
+     document blocks (provider must support documents — see "PDF
+     attachments" below).
    - Resolves each leg via the existing flight resolver and creates the
-     flight with the forwarder as the sole passenger.
+     flight with the forwarder as the sole passenger. If the resolver
+     reports the flight isn't in the airline's schedule yet *and* the
+     LLM extracted enough schedule detail from the email itself, the
+     flight is added from the email's own data and the reply asks the
+     user to double-check the times in the app.
 3. The server replies with a summary of what was added or skipped. If the
    sender isn't recognised or DKIM fails, the message is moved to a
    `.failed/` Maildir subdirectory and **no reply is sent** (we don't

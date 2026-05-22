@@ -158,6 +158,28 @@ func (s *Service) processOne(ctx context.Context, path string) outcome {
 	failed := []ReplyFailure{}
 	for _, leg := range legs {
 		if _, err := flightops.Create(ctx, s.FlightDeps, u.ID, leg.Ident, leg.Date); err != nil {
+			// If the provider just doesn't know about this flight yet but
+			// the email itself spells out the schedule, fall back to a
+			// manual add so we don't make the user re-enter what we
+			// already extracted. Reserved for the two "no upstream data"
+			// sentinels — transient/auth errors still surface as failures.
+			if isResolverGap(err) && leg.HasManualDetails() {
+				if _, mErr := flightops.CreateManual(ctx, s.FlightDeps, u.ID, flightops.ManualCreatePayload{
+					Ident:           leg.Ident,
+					DepartDate:      leg.Date,
+					DepartTimeLocal: leg.DepartTimeLocal,
+					ArriveDate:      leg.ArriveDate,
+					ArriveTimeLocal: leg.ArriveTimeLocal,
+					OriginIATA:      leg.OriginIATA,
+					DestIATA:        leg.DestIATA,
+					Notes:           "Added from email — schedule not yet published by airline; please verify times.",
+				}); mErr == nil {
+					added = append(added, ReplyLeg{Ident: leg.Ident, Date: leg.Date, ManualNote: true})
+					continue
+				} else {
+					slog.Warn("emailingest: manual fallback insert failed", "err", mErr, "ident", leg.Ident)
+				}
+			}
 			failed = append(failed, ReplyFailure{Ident: leg.Ident, Date: leg.Date, Reason: failureReason(err)})
 			continue
 		}
@@ -236,6 +258,17 @@ func buildPrompt(p *Parsed, max int) (string, []Document) {
 		})
 	}
 	return body, docs
+}
+
+// isResolverGap reports whether err means the upstream provider had no
+// usable record for this ident+date — i.e. the case where falling back
+// to the email's own schedule details is appropriate. Transient errors
+// (auth, network, rate-limit) are NOT included: those should keep
+// surfacing as failures so a retry on the next tick or a user fix can
+// pick them up.
+func isResolverGap(err error) bool {
+	return errors.Is(err, providers.ErrFlightUnscheduled) ||
+		errors.Is(err, providers.ErrFlightNotFound)
 }
 
 // failureReason renders a per-leg ReplyFailure.Reason string, recognising

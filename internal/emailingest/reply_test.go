@@ -89,6 +89,26 @@ func TestBuildReply_EmptySubject(t *testing.T) {
 	}
 }
 
+func TestBuildReply_ManualNote(t *testing.T) {
+	in := ReplyInput{
+		FromAddr: "flights@flights.example", ToAddr: "u@x", PublicURL: "https://flights.example",
+		Added: []ReplyLeg{
+			{Ident: "TK1980", Date: "2026-06-12"},
+			{Ident: "TK1981", Date: "2026-06-13", ManualNote: true},
+		},
+	}
+	body := BuildReply(in)
+	if !strings.Contains(body, "TK1980 on 2026-06-12\r\n") {
+		t.Errorf("resolver-driven line should NOT have manual suffix: %s", body)
+	}
+	if !strings.Contains(body, "TK1981 on 2026-06-13 (from the email — please verify the times)") {
+		t.Errorf("manual line missing suffix: %s", body)
+	}
+	if !strings.Contains(body, "please check the departure and arrival times") {
+		t.Errorf("manual trailer missing: %s", body)
+	}
+}
+
 func TestSend_BinaryDoesNotExist(t *testing.T) {
 	err := Send(context.Background(), "/tmp/does-not-exist-flight-tracker", "From: a\r\n\r\n")
 	if err == nil {

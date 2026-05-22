@@ -148,6 +148,69 @@ func TestExtract_PassesDocsThrough(t *testing.T) {
 	}
 }
 
+func TestExtract_ManualFieldsParsed(t *testing.T) {
+	x, _ := newExtractor(`{"flights":[{
+		"ident":"TK1980","date":"2026-06-12","confidence":"high",
+		"origin_iata":"ist","dest_iata":"LHR",
+		"depart_time":"22:30","arrive_date":"2026-06-13","arrive_time":"01:15"
+	}]}`)
+	legs, err := x.Extract(context.Background(), "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legs) != 1 {
+		t.Fatalf("len(legs) = %d", len(legs))
+	}
+	g := legs[0]
+	if g.OriginIATA != "IST" || g.DestIATA != "LHR" {
+		t.Errorf("IATAs = %q/%q", g.OriginIATA, g.DestIATA)
+	}
+	if g.DepartTimeLocal != "22:30" || g.ArriveTimeLocal != "01:15" {
+		t.Errorf("times = %q/%q", g.DepartTimeLocal, g.ArriveTimeLocal)
+	}
+	if g.ArriveDate != "2026-06-13" {
+		t.Errorf("arrive_date = %q", g.ArriveDate)
+	}
+	if !g.HasManualDetails() {
+		t.Errorf("HasManualDetails() = false, want true")
+	}
+}
+
+func TestExtract_ManualFieldsAbsent(t *testing.T) {
+	x, _ := newExtractor(`{"flights":[{"ident":"TK1980","date":"2026-06-12","confidence":"high"}]}`)
+	legs, err := x.Extract(context.Background(), "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legs) != 1 {
+		t.Fatalf("len(legs) = %d", len(legs))
+	}
+	if legs[0].HasManualDetails() {
+		t.Errorf("HasManualDetails() = true with empty extras")
+	}
+}
+
+func TestExtract_DropsMalformedManualFields(t *testing.T) {
+	// Garbled IATAs and times are silently dropped — the core ident/date
+	// leg still comes through; the manual-fallback path simply won't fire.
+	x, _ := newExtractor(`{"flights":[{
+		"ident":"TK1980","date":"2026-06-12","confidence":"high",
+		"origin_iata":"london","dest_iata":"JF","depart_time":"22h30","arrive_date":"13/06/2026","arrive_time":"too late"
+	}]}`)
+	legs, err := x.Extract(context.Background(), "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legs) != 1 {
+		t.Fatalf("len(legs) = %d", len(legs))
+	}
+	g := legs[0]
+	if g.OriginIATA != "" || g.DestIATA != "" || g.DepartTimeLocal != "" ||
+		g.ArriveTimeLocal != "" || g.ArriveDate != "" {
+		t.Errorf("expected all manual fields empty, got %+v", g)
+	}
+}
+
 func TestStripCodeFence(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"hello", "hello"},

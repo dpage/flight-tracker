@@ -9,9 +9,14 @@ import (
 )
 
 // ReplyLeg is a flight that was added.
+//
+// ManualNote is set when the flight was inserted from the email's own
+// schedule details rather than the airline's provider data — the reply
+// tells the user to double-check the times in that case.
 type ReplyLeg struct {
-	Ident string
-	Date  string
+	Ident      string
+	Date       string
+	ManualNote bool
 }
 
 // ReplyFailure is a flight that the LLM extracted but we couldn't add.
@@ -51,22 +56,41 @@ func BuildReply(in ReplyInput) string {
 	sb.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
 
 	link := strings.TrimRight(in.PublicURL, "/")
+	anyManual := false
+	for _, l := range in.Added {
+		if l.ManualNote {
+			anyManual = true
+			break
+		}
+	}
+	manualSuffix := func(l ReplyLeg) string {
+		if l.ManualNote {
+			return " (from the email — please verify the times)"
+		}
+		return ""
+	}
+	manualTrailer := ""
+	if anyManual {
+		manualTrailer = "\r\nFor flight(s) marked \"from the email\", the airline hadn't published a schedule yet, so I used the details from the email itself — please check the departure and arrival times in the app.\r\n"
+	}
 	switch {
 	case len(in.Added) > 0 && len(in.Failed) == 0:
 		sb.WriteString("I processed your forwarded email and added the following flight(s):\r\n\r\n")
 		for _, l := range in.Added {
-			fmt.Fprintf(&sb, "  + %s on %s\r\n", l.Ident, l.Date)
+			fmt.Fprintf(&sb, "  + %s on %s%s\r\n", l.Ident, l.Date, manualSuffix(l))
 		}
+		sb.WriteString(manualTrailer)
 	case len(in.Added) > 0 && len(in.Failed) > 0:
 		sb.WriteString("I processed your forwarded email and added the following flight(s):\r\n\r\n")
 		for _, l := range in.Added {
-			fmt.Fprintf(&sb, "  + %s on %s\r\n", l.Ident, l.Date)
+			fmt.Fprintf(&sb, "  + %s on %s%s\r\n", l.Ident, l.Date, manualSuffix(l))
 		}
 		fmt.Fprintf(&sb, "\r\nI couldn't add %d flight(s):\r\n\r\n", len(in.Failed))
 		for _, l := range in.Failed {
 			fmt.Fprintf(&sb, "  - %s on %s — %s\r\n", l.Ident, l.Date, l.Reason)
 		}
-		fmt.Fprintf(&sb, "\r\nPlease add those manually at %s/ .\r\n", link)
+		sb.WriteString(manualTrailer)
+		fmt.Fprintf(&sb, "\r\nPlease add the failed flight(s) manually at %s/ .\r\n", link)
 	case len(in.Failed) > 0:
 		sb.WriteString("I couldn't add any of the flights from this email:\r\n\r\n")
 		for _, l := range in.Failed {
