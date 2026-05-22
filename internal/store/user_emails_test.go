@@ -186,3 +186,48 @@ func TestInsertUnverifiedEmail_ConflictReturnsErrAddressTaken(t *testing.T) {
 		t.Errorf("err = %v, want ErrAddressTaken", err)
 	}
 }
+
+func TestResendVerification_RotatesToken(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	e, oldToken, err := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, newToken, err := s.ResendVerification(ctx, u.ID, e.ID)
+	if err != nil {
+		t.Fatalf("ResendVerification: %v", err)
+	}
+	if newToken == "" || newToken == oldToken {
+		t.Errorf("newToken = %q, oldToken = %q, want a new non-empty value", newToken, oldToken)
+	}
+	if updated.VerifyToken == nil || *updated.VerifyToken != newToken {
+		t.Errorf("row.VerifyToken = %v, want %q", updated.VerifyToken, newToken)
+	}
+}
+
+func TestResendVerification_WrongUserNotFound(t *testing.T) {
+	s := newStore(t)
+	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	e, _, _ := s.InsertUnverifiedEmail(ctx, u1.ID, "alice@example.com")
+
+	_, _, err := s.ResendVerification(ctx, u2.ID, e.ID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestResendVerification_AlreadyVerified(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	if err := s.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.EmailsByUser(ctx, u.ID)
+	_, _, err := s.ResendVerification(ctx, u.ID, rows[0].ID)
+	if !errors.Is(err, ErrAlreadyVerified) {
+		t.Errorf("err = %v, want ErrAlreadyVerified", err)
+	}
+}

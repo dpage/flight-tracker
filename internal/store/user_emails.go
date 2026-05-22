@@ -95,6 +95,39 @@ func generateToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// ResendVerification regenerates verify_token and bumps verify_sent_at for
+// an unverified row owned by userID. Returns ErrNotFound when the row
+// doesn't exist or is owned by someone else; ErrAlreadyVerified when the
+// row is already verified.
+func (s *Store) ResendVerification(ctx context.Context, userID, emailID int64) (*UserEmail, string, error) {
+	// First, fetch the row to distinguish "not yours" (ErrNotFound) from
+	// "already verified" (ErrAlreadyVerified). The handler maps these to
+	// different HTTP status codes.
+	row, err := scanUserEmail(s.pool.QueryRow(ctx,
+		`SELECT `+userEmailColumns+`
+		FROM user_emails WHERE id = $1 AND user_id = $2`, emailID, userID))
+	if err != nil {
+		return nil, "", err
+	}
+	if row.Verified {
+		return nil, "", ErrAlreadyVerified
+	}
+	token, err := generateToken()
+	if err != nil {
+		return nil, "", err
+	}
+	updated, err := scanUserEmail(s.pool.QueryRow(ctx, `
+		UPDATE user_emails
+		SET verify_token = $3, verify_sent_at = NOW()
+		WHERE id = $1 AND user_id = $2
+		RETURNING `+userEmailColumns,
+		emailID, userID, token))
+	if err != nil {
+		return nil, "", err
+	}
+	return updated, token, nil
+}
+
 // InsertUnverifiedEmail inserts a new email row for userID with a fresh
 // random verify_token and verify_sent_at = NOW(). Returns the row and the
 // raw token (so the caller can embed it in a verification URL). The token
