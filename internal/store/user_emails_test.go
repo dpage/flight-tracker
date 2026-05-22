@@ -231,3 +231,59 @@ func TestResendVerification_AlreadyVerified(t *testing.T) {
 		t.Errorf("err = %v, want ErrAlreadyVerified", err)
 	}
 }
+
+func TestVerifyEmailByToken_HappyPath(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
+
+	got, err := s.VerifyEmailByToken(ctx, token)
+	if err != nil {
+		t.Fatalf("VerifyEmailByToken: %v", err)
+	}
+	if !got.Verified || got.VerifiedAt == nil {
+		t.Errorf("row not marked verified: %+v", got)
+	}
+	if got.VerifyToken != nil {
+		t.Errorf("VerifyToken should be cleared, got %v", got.VerifyToken)
+	}
+}
+
+func TestVerifyEmailByToken_SecondCallNotFound(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
+
+	if _, err := s.VerifyEmailByToken(ctx, token); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	_, err := s.VerifyEmailByToken(ctx, token)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("second call err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestVerifyEmailByToken_BadToken(t *testing.T) {
+	s := newStore(t)
+	_, err := s.VerifyEmailByToken(ctx, "no-such-token")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestVerifyEmailByToken_ExpiredTokenNotFound(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
+
+	// Backdate verify_sent_at to 25 hours ago to push the row past the TTL.
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE user_emails SET verify_sent_at = NOW() - INTERVAL '25 hours' WHERE verify_token = $1`,
+		token); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.VerifyEmailByToken(ctx, token)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expired token err = %v, want ErrNotFound", err)
+	}
+}

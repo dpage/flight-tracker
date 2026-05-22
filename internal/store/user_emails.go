@@ -128,6 +128,27 @@ func (s *Store) ResendVerification(ctx context.Context, userID, emailID int64) (
 	return updated, token, nil
 }
 
+// VerifyEmailByToken flips an unverified row matching token to verified.
+// Returns ErrNotFound when the token is unknown, already consumed, or
+// older than 24 hours. The update is atomic — the token is cleared as
+// part of the same statement so a second call returns ErrNotFound.
+func (s *Store) VerifyEmailByToken(ctx context.Context, token string) (*UserEmail, error) {
+	if token == "" {
+		return nil, ErrNotFound
+	}
+	row, err := scanUserEmail(s.pool.QueryRow(ctx, `
+		UPDATE user_emails
+		SET verified = TRUE, verified_at = NOW(), verify_token = NULL
+		WHERE verify_token = $1
+		  AND verify_sent_at > NOW() - INTERVAL '24 hours'
+		RETURNING `+userEmailColumns,
+		token))
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
 // InsertUnverifiedEmail inserts a new email row for userID with a fresh
 // random verify_token and verify_sent_at = NOW(). Returns the row and the
 // raw token (so the caller can embed it in a verification URL). The token
