@@ -107,4 +107,52 @@ describe('EmailsDialog', () => {
 
     await waitFor(() => expect(h.setError).toHaveBeenCalledWith('address already registered'));
   });
+
+  it('surfaces delete errors via setError', async () => {
+    h.api.listMyEmails.mockResolvedValue([
+      row({ id: 5, address: 'gone@example.com', verified: true }),
+    ]);
+    h.api.deleteMyEmail.mockRejectedValue(new Error('delete boom'));
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<EmailsDialog open onClose={() => {}} />);
+    await screen.findByText('gone@example.com');
+
+    await userEvent.click(screen.getByRole('button', { name: /delete gone@example.com/i }));
+    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('delete boom'));
+    confirmSpy.mockRestore();
+  });
+
+  it('surfaces resend errors via setError', async () => {
+    h.api.listMyEmails.mockResolvedValue([
+      row({ id: 7, address: 'pending@example.com', verified: false }),
+    ]);
+    h.api.resendMyEmail.mockRejectedValue(new Error('mail down'));
+    render(<EmailsDialog open onClose={() => {}} />);
+    await screen.findByText('pending@example.com');
+
+    await userEvent.click(screen.getByRole('button', { name: /resend pending@example.com/i }));
+    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('mail down'));
+  });
+
+  it('stringifies non-Error rejections', async () => {
+    // Mocked rejection is a plain string (not an Error instance) — exercises
+    // the String(err) branch of reportError.
+    h.api.listMyEmails.mockRejectedValue('listing exploded');
+    render(<EmailsDialog open onClose={() => {}} />);
+    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('listing exploded'));
+  });
+
+  it('does not call deleteMyEmail when the user cancels confirm()', async () => {
+    h.api.listMyEmails.mockResolvedValue([
+      row({ id: 5, address: 'stays@example.com', verified: true }),
+    ]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<EmailsDialog open onClose={() => {}} />);
+    await screen.findByText('stays@example.com');
+
+    await userEvent.click(screen.getByRole('button', { name: /delete stays@example.com/i }));
+    expect(h.api.deleteMyEmail).not.toHaveBeenCalled();
+    expect(screen.getByText('stays@example.com')).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
 });

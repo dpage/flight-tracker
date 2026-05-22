@@ -216,6 +216,30 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
     await api.deleteUser(2);
   });
 
+  it('listMyEmails', async () => {
+    await api.listMyEmails();
+    expect(last()[0]).toBe('/api/me/emails');
+    expect(last()[1]?.method).toBe('GET');
+  });
+
+  it('addMyEmail', async () => {
+    await api.addMyEmail('alice@example.com');
+    expect(last()[0]).toBe('/api/me/emails');
+    expect(last()[1]?.method).toBe('POST');
+    expect(last()[1]?.body).toBe(JSON.stringify({ address: 'alice@example.com' }));
+  });
+
+  it('resendMyEmail', async () => {
+    await api.resendMyEmail(7);
+    expect(last()[0]).toBe('/api/me/emails/7/resend');
+    expect(last()[1]?.method).toBe('POST');
+  });
+
+  it('deleteMyEmail', async () => {
+    mockFetch(() => ({ status: 204, ok: true }) as unknown as Response);
+    await api.deleteMyEmail(7);
+  });
+
   it('logout posts to /auth/logout and resolves undefined', async () => {
     const s = mockFetch(
       () => Promise.resolve({ status: 200, ok: true } as unknown as Response),

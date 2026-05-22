@@ -36,13 +36,15 @@ export default function EmailsDialog({ open, onClose }: Props) {
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const reportError = (err: unknown) =>
+    setError(err instanceof Error ? err.message : String(err));
+
   useEffect(() => {
     if (!open) return;
-    void api
-      .listMyEmails()
-      .then(setEmails)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [open, setError]);
+    void api.listMyEmails().then(setEmails).catch(reportError);
+    // reportError closes over setError, which is stable; intentional dep list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleAdd = async () => {
     const trimmed = address.trim();
@@ -53,7 +55,7 @@ export default function EmailsDialog({ open, onClose }: Props) {
       setEmails((rows) => [created, ...rows]);
       setAddress('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportError(err);
     } finally {
       setBusy(false);
     }
@@ -65,7 +67,7 @@ export default function EmailsDialog({ open, onClose }: Props) {
       await api.deleteMyEmail(row.id);
       setEmails((rows) => rows.filter((r) => r.id !== row.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportError(err);
     }
   };
 
@@ -74,7 +76,7 @@ export default function EmailsDialog({ open, onClose }: Props) {
       const updated = await api.resendMyEmail(row.id);
       setEmails((rows) => rows.map((r) => (r.id === row.id ? updated : r)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      reportError(err);
     }
   };
 
