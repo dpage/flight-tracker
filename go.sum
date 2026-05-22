@@ -11,10 +11,8 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
-github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 h1:QwWKgMY28TAXaDl+ExRDqGQltzXqN/xypdKP86niVn8=
-github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728/go.mod h1:1fEHWurg7pvf5SG6XNE5Q8UZmOwex51Mkx3SLhrW5B4=
-github.com/pgEdge/pgedge-go-llm-lib v0.0.0-20260505085329-4b7512b42f91 h1:+ewd9HQoAJM48/WeA7CoyPflP+Je6oXPO2ZUqqqUZBg=
-github.com/pgEdge/pgedge-go-llm-lib v0.0.0-20260505085329-4b7512b42f91/go.mod h1:41rtSLcp/wwSUlBqetVHLQKisDZfzBmgSWt84WA+Eys=
+github.com/pgEdge/pgedge-go-llm-lib v0.0.0-20260522165316-449f0033199d h1:zs39epK8PBw3wVZc3HvW5BV+Sspi36hpl8c+xjgBfdI=
+github.com/pgEdge/pgedge-go-llm-lib v0.0.0-20260522165316-449f0033199d/go.mod h1:41rtSLcp/wwSUlBqetVHLQKisDZfzBmgSWt84WA+Eys=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

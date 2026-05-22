@@ -16,10 +16,21 @@ type Leg struct {
 	Confidence string // high | medium | low
 }
 
+// Document is one binary attachment passed to the LLM alongside the
+// prompt — typically a PDF airline ticket. MediaType is the MIME type
+// (e.g. "application/pdf"); Filename is informational only.
+type Document struct {
+	Data      []byte
+	MediaType string
+	Filename  string
+}
+
 // LLM is the minimal interface Extractor needs. The real implementation
-// wraps pgedge-go-llm-lib; tests pass in a fake.
+// wraps pgedge-go-llm-lib; tests pass in a fake. Documents may be empty
+// (text-only emails) and providers that don't support documents may
+// receive a text-only retry — see RealLLM.Complete.
 type LLM interface {
-	Complete(ctx context.Context, prompt string) (string, error)
+	Complete(ctx context.Context, prompt string, docs []Document) (string, error)
 }
 
 // Extractor calls an LLM and parses its JSON response into legs.
@@ -46,12 +57,12 @@ If a leg's ident or date is ambiguous, set confidence to "low" and the caller wi
 var identRe = regexp.MustCompile(`^[A-Z0-9]{2,3}[0-9]{1,4}[A-Z]?$`)
 var dateRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 
-// Extract calls the LLM with the body, parses the JSON response, drops any
-// leg that's low-confidence or fails regex / sanity validation, and returns
-// the rest.
-func (x *Extractor) Extract(ctx context.Context, body string) ([]Leg, error) {
+// Extract calls the LLM with the body and any document attachments,
+// parses the JSON response, drops any leg that's low-confidence or fails
+// regex / sanity validation, and returns the rest.
+func (x *Extractor) Extract(ctx context.Context, body string, docs []Document) ([]Leg, error) {
 	prompt := fmt.Sprintf(systemPrompt, x.Now().UTC().Format(time.RFC3339)) + "\n\n---\n\n" + body
-	raw, err := x.LLM.Complete(ctx, prompt)
+	raw, err := x.LLM.Complete(ctx, prompt, docs)
 	if err != nil {
 		return nil, fmt.Errorf("llm complete: %w", err)
 	}
