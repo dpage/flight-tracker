@@ -1,0 +1,8 @@
+From: Devrim <devrim@example.com>
+To: flights@flights.example
+Subject: Fwd: BA432
+Message-ID: <html1@example.com>
+Authentication-Results: mail.flights.example; dkim=pass header.d=ba.com
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>BA432 LHR-MUC on <b>15 June 2026</b>.</p></body></html>

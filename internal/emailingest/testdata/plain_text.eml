@@ -1,0 +1,11 @@
+From: Devrim <devrim@example.com>
+To: flights@flights.example
+Subject: Fwd: TK1980 confirmation
+Message-ID: <plain1@example.com>
+Authentication-Results: mail.flights.example;
+  dkim=pass header.d=example.com
+Content-Type: text/plain; charset=utf-8
+
+Hi, here's my booking:
+
+  TK1980 IST -> LHR on 12 June 2026 09:30 local.

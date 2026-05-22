@@ -1,0 +1,26 @@
+From: Devrim <devrim@example.com>
+To: flights@flights.example
+Subject: =?UTF-8?B?Rndkw6E6IFRLMTk4MA==?=
+Message-ID: <multi1@example.com>
+Authentication-Results: mail.flights.example; dkim=pass header.d=example.com
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Booking confirmation: TK1980 on 12 June 2026.=
+ Extra QP-encoded text.
+
+--BOUNDARY
+Content-Type: text/html; charset=utf-8
+
+<p>HTML view: <b>TK1980</b> 12 June 2026</p>
+
+--BOUNDARY
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBkdW1teQo=
+
+--BOUNDARY--
