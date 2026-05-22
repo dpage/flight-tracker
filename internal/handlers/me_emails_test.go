@@ -190,3 +190,30 @@ func TestResendMyEmail_NotMine(t *testing.T) {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
 }
+
+func TestDeleteMyEmail_HappyPath(t *testing.T) {
+	e := setup(t, nil, &config.Config{EmailIngestEnabled: true})
+	uid := e.user(t, "alice", false)
+	row, _, _ := e.store.InsertUnverifiedEmail(context.Background(), uid, "alice@example.com")
+
+	w := e.req(t, "DELETE", "/api/me/emails/"+itoa(row.ID), nil, uid)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	got, _ := e.store.EmailsByUser(context.Background(), uid)
+	if len(got) != 0 {
+		t.Errorf("row not deleted: %+v", got)
+	}
+}
+
+func TestDeleteMyEmail_NotMine(t *testing.T) {
+	e := setup(t, nil, &config.Config{EmailIngestEnabled: true})
+	uid := e.user(t, "alice", false)
+	other := e.user(t, "bob", false)
+	row, _, _ := e.store.InsertUnverifiedEmail(context.Background(), other, "bob@example.com")
+
+	w := e.req(t, "DELETE", "/api/me/emails/"+itoa(row.ID), nil, uid)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}

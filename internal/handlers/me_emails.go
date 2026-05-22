@@ -95,3 +95,21 @@ func (a *API) resendMyEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, api.ToUserEmailDTO(row))
 }
+
+func (a *API) deleteMyEmail(w http.ResponseWriter, r *http.Request) {
+	if a.Config == nil || !a.Config.EmailIngestEnabled {
+		writeError(w, http.StatusServiceUnavailable, emailIngestDisabledMsg)
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	u := auth.UserFrom(r.Context())
+	if err := a.Store.DeleteUserEmail(r.Context(), u.ID, id); err != nil {
+		handleStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -56,6 +56,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/me/emails", req(http.HandlerFunc(a.listMyEmails)))
 	mux.Handle("POST /api/me/emails", req(http.HandlerFunc(a.addMyEmail)))
 	mux.Handle("POST /api/me/emails/{id}/resend", req(http.HandlerFunc(a.resendMyEmail)))
+	mux.Handle("DELETE /api/me/emails/{id}", req(http.HandlerFunc(a.deleteMyEmail)))
 
 	mux.Handle("GET /api/flights", req(http.HandlerFunc(a.listFlights)))
 	mux.Handle("POST /api/flights", req(http.HandlerFunc(a.createFlight)))
