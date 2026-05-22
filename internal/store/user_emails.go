@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const userEmailColumns = `id, user_id, address, verified, verify_token,
@@ -81,4 +84,45 @@ func (s *Store) EmailsByUser(ctx context.Context, userID int64) ([]*UserEmail, e
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// generateToken returns a 32-byte cryptographically-random URL-safe token.
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// InsertUnverifiedEmail inserts a new email row for userID with a fresh
+// random verify_token and verify_sent_at = NOW(). Returns the row and the
+// raw token (so the caller can embed it in a verification URL). The token
+// is not exposed by the store outside of this return value.
+//
+// Returns ErrAddressTaken if the address (case-insensitive) is already
+// owned by any user — including userID itself.
+func (s *Store) InsertUnverifiedEmail(ctx context.Context, userID int64, address string) (*UserEmail, string, error) {
+	addr := strings.TrimSpace(address)
+	if addr == "" {
+		return nil, "", errors.New("address required")
+	}
+	token, err := generateToken()
+	if err != nil {
+		return nil, "", err
+	}
+	row, err := scanUserEmail(s.pool.QueryRow(ctx, `
+		INSERT INTO user_emails (user_id, address, verified, verify_token, verify_sent_at)
+		VALUES ($1, $2, FALSE, $3, NOW())
+		RETURNING `+userEmailColumns,
+		userID, addr, token))
+	if err != nil {
+		// Surface the unique-violation on lower(address) as ErrAddressTaken.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, "", ErrAddressTaken
+		}
+		return nil, "", err
+	}
+	return row, token, nil
 }

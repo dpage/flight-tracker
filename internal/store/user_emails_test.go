@@ -134,3 +134,55 @@ func TestEmailsByUser_MultipleNewestFirst(t *testing.T) {
 		t.Errorf("order = [%s, %s]", got[0].Address, got[1].Address)
 	}
 }
+
+func TestInsertUnverifiedEmail_Insert(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+
+	e, token, err := s.InsertUnverifiedEmail(ctx, u.ID, "Alice@Example.com")
+	if err != nil {
+		t.Fatalf("InsertUnverifiedEmail: %v", err)
+	}
+	if e.Verified {
+		t.Error("new row should be unverified")
+	}
+	if token == "" {
+		t.Error("expected non-empty token")
+	}
+	if e.VerifyToken == nil || *e.VerifyToken != token {
+		t.Errorf("row.VerifyToken = %v, want %q", e.VerifyToken, token)
+	}
+	if e.VerifySentAt == nil {
+		t.Error("VerifySentAt should be set")
+	}
+}
+
+func TestInsertUnverifiedEmail_TrimsAndRejectsEmpty(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+
+	if _, _, err := s.InsertUnverifiedEmail(ctx, u.ID, "   "); err == nil {
+		t.Error("expected error for empty address")
+	}
+	if _, _, err := s.InsertUnverifiedEmail(ctx, u.ID, "  bob@example.com  "); err != nil {
+		t.Fatalf("InsertUnverifiedEmail trim: %v", err)
+	}
+	got, _ := s.EmailsByUser(ctx, u.ID)
+	if len(got) != 1 || got[0].Address != "bob@example.com" {
+		t.Errorf("got = %+v, want one row with trimmed address", got)
+	}
+}
+
+func TestInsertUnverifiedEmail_ConflictReturnsErrAddressTaken(t *testing.T) {
+	s := newStore(t)
+	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+
+	if _, _, err := s.InsertUnverifiedEmail(ctx, u1.ID, "shared@example.com"); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	_, _, err := s.InsertUnverifiedEmail(ctx, u2.ID, "shared@example.com")
+	if !errors.Is(err, ErrAddressTaken) {
+		t.Errorf("err = %v, want ErrAddressTaken", err)
+	}
+}
