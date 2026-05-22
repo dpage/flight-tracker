@@ -287,3 +287,33 @@ func TestVerifyEmailByToken_ExpiredTokenNotFound(t *testing.T) {
 		t.Errorf("expired token err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestDeleteUserEmail_HappyPath(t *testing.T) {
+	s := newStore(t)
+	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	e, _, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
+
+	if err := s.DeleteUserEmail(ctx, u.ID, e.ID); err != nil {
+		t.Fatalf("DeleteUserEmail: %v", err)
+	}
+	got, _ := s.EmailsByUser(ctx, u.ID)
+	if len(got) != 0 {
+		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}
+
+func TestDeleteUserEmail_WrongUserNotFound(t *testing.T) {
+	s := newStore(t)
+	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	e, _, _ := s.InsertUnverifiedEmail(ctx, u1.ID, "alice@example.com")
+
+	if err := s.DeleteUserEmail(ctx, u2.ID, e.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	// Row is still there for the rightful owner.
+	got, _ := s.EmailsByUser(ctx, u1.ID)
+	if len(got) != 1 {
+		t.Errorf("rightful owner lost their row, got %d", len(got))
+	}
+}

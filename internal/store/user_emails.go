@@ -149,6 +149,21 @@ func (s *Store) VerifyEmailByToken(ctx context.Context, token string) (*UserEmai
 	return row, nil
 }
 
+// DeleteUserEmail removes the row whose (id, user_id) match. Returns
+// ErrNotFound when no row was deleted (unknown id or wrong owner).
+func (s *Store) DeleteUserEmail(ctx context.Context, userID, emailID int64) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM user_emails WHERE id = $1 AND user_id = $2`,
+		emailID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // InsertUnverifiedEmail inserts a new email row for userID with a fresh
 // random verify_token and verify_sent_at = NOW(). Returns the row and the
 // raw token (so the caller can embed it in a verification URL). The token
