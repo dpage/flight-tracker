@@ -35,6 +35,7 @@ func (f fakeResolver) Resolve(context.Context, string, time.Time) (*providers.Re
 
 type testEnv struct {
 	mux   *http.ServeMux
+	api   *API
 	store *store.Store
 	cfg   *config.Config
 	hub   *sse.Hub
@@ -53,7 +54,7 @@ func setup(t *testing.T, resolver providers.Resolver, cfg *config.Config) *testE
 	api := New(s, a, hub, cfg, resolver)
 	mux := http.NewServeMux()
 	api.Register(mux)
-	return &testEnv{mux: mux, store: s, cfg: cfg, hub: hub, pool: pool}
+	return &testEnv{mux: mux, api: api, store: s, cfg: cfg, hub: hub, pool: pool}
 }
 
 func (e *testEnv) req(t *testing.T, method, path string, body any, asUser int64) *httptest.ResponseRecorder {

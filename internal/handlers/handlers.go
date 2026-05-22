@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dpage/flight-tracker/internal/auth"
 	"github.com/dpage/flight-tracker/internal/config"
+	"github.com/dpage/flight-tracker/internal/emailingest"
 	"github.com/dpage/flight-tracker/internal/providers"
 	"github.com/dpage/flight-tracker/internal/sse"
 	"github.com/dpage/flight-tracker/internal/store"
@@ -20,10 +22,26 @@ type API struct {
 	Hub      *sse.Hub
 	Config   *config.Config
 	Resolver providers.Resolver // may be nil if no resolver is configured
+
+	// SendVerifyEmail dispatches the verification message. Defaulted in
+	// New() to the real sendmail pipe; tests can override.
+	SendVerifyEmail func(ctx context.Context, to, token string) error
 }
 
 func New(s *store.Store, a *auth.Handler, hub *sse.Hub, cfg *config.Config, r providers.Resolver) *API {
-	return &API{Store: s, Auth: a, Hub: hub, Config: cfg, Resolver: r}
+	api := &API{Store: s, Auth: a, Hub: hub, Config: cfg, Resolver: r}
+	api.SendVerifyEmail = api.defaultSendVerifyEmail
+	return api
+}
+
+func (a *API) defaultSendVerifyEmail(ctx context.Context, to, token string) error {
+	msg := emailingest.BuildVerifyEmail(emailingest.VerifyInput{
+		FromAddr:  a.Config.EmailIngestAddress,
+		ToAddr:    to,
+		PublicURL: a.Config.PublicURL,
+		Token:     token,
+	})
+	return emailingest.Send(ctx, a.Config.EmailIngestSendmail, msg)
 }
 
 // Register attaches every /api/* route. All routes require an authenticated
@@ -36,6 +54,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/config", req(http.HandlerFunc(a.getConfig)))
 	mux.Handle("GET /api/events", req(http.HandlerFunc(a.events)))
 	mux.Handle("GET /api/me/emails", req(http.HandlerFunc(a.listMyEmails)))
+	mux.Handle("POST /api/me/emails", req(http.HandlerFunc(a.addMyEmail)))
 
 	mux.Handle("GET /api/flights", req(http.HandlerFunc(a.listFlights)))
 	mux.Handle("POST /api/flights", req(http.HandlerFunc(a.createFlight)))
