@@ -51,6 +51,7 @@ func NewHandler(clientID, clientSecret string, sessionKey []byte, publicURL stri
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/github/login", h.Login)
 	mux.HandleFunc("GET /auth/github/callback", h.Callback)
+	mux.HandleFunc("GET /auth/verify-email", h.VerifyEmail)
 	mux.HandleFunc("POST /auth/logout", h.Logout)
 }
 
