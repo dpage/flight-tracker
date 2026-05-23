@@ -390,6 +390,74 @@ it('refreshFlights passes both showAll and showOld', async () => {
   expect(mockApi.listFlights).toHaveBeenCalledWith({ showAll: true, showOld: true });
 });
 
+describe('setShowMineOnly', () => {
+  // showMineOnly is persisted with inverted semantics: defaults ON when the
+  // key is absent, only an explicit OFF ('0') is written to localStorage.
+  let store: Record<string, string>;
+
+  beforeEach(() => {
+    store = {};
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => (k in store ? store[k] : null),
+        setItem: (k: string, v: string) => {
+          store[k] = String(v);
+        },
+        removeItem: (k: string) => {
+          delete store[k];
+        },
+        clear: () => {
+          store = {};
+        },
+        key: (i: number) => Object.keys(store)[i] ?? null,
+        get length() {
+          return Object.keys(store).length;
+        },
+      },
+    });
+  });
+
+  it('flipping off writes "0" to localStorage and updates state', () => {
+    useStore.getState().setShowMineOnly(false);
+    expect(useStore.getState().showMineOnly).toBe(false);
+    expect(window.localStorage.getItem('ft.show_mine_only')).toBe('0');
+  });
+
+  it('flipping back on removes the localStorage key', () => {
+    window.localStorage.setItem('ft.show_mine_only', '0');
+    useStore.getState().setShowMineOnly(true);
+    expect(useStore.getState().showMineOnly).toBe(true);
+    expect(window.localStorage.getItem('ft.show_mine_only')).toBeNull();
+  });
+
+  it('does not refetch flights — filter is client-side', () => {
+    useStore.getState().setShowMineOnly(false);
+    expect(mockApi.listFlights).not.toHaveBeenCalled();
+  });
+
+  it('swallows localStorage errors and still updates state', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem() {
+          throw new Error('blocked');
+        },
+        setItem() {
+          throw new Error('blocked');
+        },
+        removeItem() {
+          throw new Error('blocked');
+        },
+      },
+    });
+    useStore.getState().setShowMineOnly(false);
+    expect(useStore.getState().showMineOnly).toBe(false);
+    useStore.getState().setShowMineOnly(true);
+    expect(useStore.getState().showMineOnly).toBe(true);
+  });
+});
+
 describe('user mutations', () => {
   it('inviteUser appends and sorts by login (case-insensitive)', async () => {
     useStore.setState({ users: [user({ id: 1, github_login: 'Zed' })] });

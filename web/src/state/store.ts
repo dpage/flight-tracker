@@ -15,6 +15,7 @@ type AuthStatus = 'loading' | 'anonymous' | 'authenticated';
 
 const SHOW_ALL_KEY = 'ft.show_all';
 const SHOW_OLD_KEY = 'ft.show_old';
+const SHOW_MINE_ONLY_KEY = 'ft.show_mine_only';
 
 interface AppState {
   auth: AuthStatus;
@@ -36,6 +37,13 @@ interface AppState {
    * Available to every signed-in user; persisted to localStorage so it
    * survives reloads. */
   showOld: boolean;
+  /** When true (the default), the flight list hides flights the signed-in
+   * user neither created nor is a passenger on. Pure client-side filter
+   * applied in useVisibleFlights — no server interaction. Persisted to
+   * localStorage with inverted semantics (absent/'1' = on, '0' = off) so
+   * the default is on for first-time visitors but an explicit off-toggle
+   * survives reloads. */
+  showMineOnly: boolean;
   error: string | null;
 
   init: () => Promise<void>;
@@ -59,6 +67,7 @@ interface AppState {
   selectFlight: (id: number | null) => void;
   setShowAll: (v: boolean) => Promise<void>;
   setShowOld: (v: boolean) => Promise<void>;
+  setShowMineOnly: (v: boolean) => void;
   applyFlightUpdate: (f: Flight) => void;
   /** Drop a flight from local state in response to a flight.deleted SSE
    * event. Idempotent: no-op if the id isn't present (we may have already
@@ -103,6 +112,26 @@ function persistShowOld(v: boolean): void {
   }
 }
 
+// Inverted semantics vs showAll/showOld: the toggle defaults to ON, so
+// absence in localStorage means "on" and the only thing we persist is an
+// explicit OFF ('0'). Any non-'0' value (including a legacy '1') reads as on.
+function loadShowMineOnly(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_MINE_ONLY_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function persistShowMineOnly(v: boolean): void {
+  try {
+    if (v) window.localStorage.removeItem(SHOW_MINE_ONLY_KEY);
+    else window.localStorage.setItem(SHOW_MINE_ONLY_KEY, '0');
+  } catch {
+    // ignore — best effort
+  }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   auth: 'loading',
   me: null,
@@ -113,6 +142,7 @@ export const useStore = create<AppState>((set, get) => ({
   lastUpdateAt: null,
   showAll: loadShowAll(),
   showOld: loadShowOld(),
+  showMineOnly: loadShowMineOnly(),
   error: null,
 
   async init() {
@@ -244,6 +274,13 @@ export const useStore = create<AppState>((set, get) => ({
     // age; the client's render-time filter (useVisibleFlights, Task 5)
     // handles flights that age out while the page is open.
     await get().refreshFlights();
+  },
+
+  setShowMineOnly(v) {
+    persistShowMineOnly(v);
+    set({ showMineOnly: v });
+    // No refetch: the filter is applied client-side in useVisibleFlights
+    // against the already-loaded flights' passenger_ids.
   },
 
   applyFlightUpdate(f) {

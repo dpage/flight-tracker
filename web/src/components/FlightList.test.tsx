@@ -8,6 +8,7 @@ const selectFlight = vi.fn();
 const deleteFlight = vi.fn();
 const setShowAll = vi.fn();
 const setShowOld = vi.fn();
+const setShowMineOnly = vi.fn();
 
 const state = {
   flights: [] as Flight[],
@@ -20,10 +21,15 @@ const state = {
   lastUpdateAt: null as number | null,
   showAll: false,
   showOld: false,
+  // Default OFF in tests so existing rendering assertions (which never set
+  // a passenger list) keep showing flights. Tests that exercise the toggle
+  // flip this on explicitly.
+  showMineOnly: false,
   selectFlight,
   deleteFlight,
   setShowAll,
   setShowOld,
+  setShowMineOnly,
 };
 
 vi.mock('../state/store', () => ({
@@ -81,6 +87,7 @@ beforeEach(() => {
   state.selectedFlightId = null;
   state.showAll = false;
   state.showOld = true;
+  state.showMineOnly = false;
 });
 
 describe('FlightList', () => {
@@ -409,6 +416,28 @@ describe('FlightList', () => {
     render(<FlightList onEditFlight={vi.fn()} />);
     await userEvent.click(screen.getByLabelText(/show old flights/i));
     expect(setShowOld).toHaveBeenCalledWith(true);
+  });
+
+  it('renders the Only my flights toggle and reflects the showMineOnly state', () => {
+    state.showMineOnly = true;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    const toggle = screen.getByLabelText(/only my flights/i) as HTMLInputElement;
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.checked).toBe(true);
+  });
+
+  it('clicking the Only my flights toggle calls setShowMineOnly(false) when it is on', async () => {
+    state.showMineOnly = true;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    await userEvent.click(screen.getByLabelText(/only my flights/i));
+    expect(setShowMineOnly).toHaveBeenCalledWith(false);
+  });
+
+  it('clicking the Only my flights toggle calls setShowMineOnly(true) when it is off', async () => {
+    state.showMineOnly = false;
+    render(<FlightList onEditFlight={vi.fn()} />);
+    await userEvent.click(screen.getByLabelText(/only my flights/i));
+    expect(setShowMineOnly).toHaveBeenCalledWith(true);
   });
 
   it('hides old flights by default and shows them when showOld is true', () => {
