@@ -956,3 +956,78 @@ func TestUpdateFlight_BothLegsUnknownToKnownSkipsResolver(t *testing.T) {
 		t.Fatalf("both coords should be table-filled post-update; got %v", got)
 	}
 }
+
+func TestUpdateFlight_PartiallyUnknownTriggersBackfillOfMissingLegOnly(t *testing.T) {
+	cfg := &config.Config{AeroDataBoxKey: "k"}
+	resolver := &fakeResolver{rf: &providers.ResolvedFlight{
+		Ident:      "BA286",
+		// Deliberately a different origin lat than the table's LHR (51.4775)
+		// — if the helper were to overwrite already-filled columns we'd see
+		// 99.0 in the response. BackfillFlight should NOT overwrite.
+		OriginIATA: "LHR", OriginLat: 99.0, OriginLon: 99.0,
+		DestIATA: "ZZZ", DestLat: 12.3456, DestLon: -34.5678,
+	}}
+	e := setup(t, resolver, cfg)
+	uid := e.user(t, "pilot", false)
+	now := time.Now()
+
+	// Seed: both IATAs unknown to force a row that starts with all coords NULL.
+	// resolver.rf returns coords for the LHR/ZZZ pair above — so after the
+	// create, the row will have origin coords = 99 and dest coords = 12.3456.
+	// That's not what we want for the seed assertion, so we use a temp
+	// resolver that returns nothing during seeding.
+	resolver.rf = nil
+	resolver.err = providers.ErrFlightNotFound
+	seed := map[string]any{
+		"ident":         "BA286",
+		"scheduled_out": now.Add(-time.Hour),
+		"scheduled_in":  now.Add(time.Hour),
+		"origin_iata":   "QQQ", "dest_iata": "ZZZ",
+	}
+	w := e.req(t, "POST", "/api/flights", seed, uid)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("seed create = %d %s", w.Code, w.Body.String())
+	}
+	created := decodeBody[map[string]any](t, w)
+	fid := int64(created["id"].(float64))
+	if created["origin_lat"] != nil || created["dest_lat"] != nil {
+		t.Fatalf("seed should have NULL coords on both legs; got %v", created)
+	}
+
+	// Restore the resolver to the happy-path fixture for the update.
+	resolver.rf = &providers.ResolvedFlight{
+		Ident:      "BA286",
+		OriginIATA: "LHR", OriginLat: 99.0, OriginLon: 99.0,
+		DestIATA: "ZZZ", DestLat: 12.3456, DestLon: -34.5678,
+	}
+	resolver.err = nil
+	priorCalls := resolver.calls
+
+	// Patch origin from unknown (QQQ) to known (LHR). Dest stays unknown (ZZZ).
+	patch := map[string]any{"origin_iata": "LHR"}
+	w = e.req(t, "PATCH", fmt.Sprintf("/api/flights/%d", fid), patch, uid)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update = %d %s", w.Code, w.Body.String())
+	}
+	if resolver.calls != priorCalls+1 {
+		t.Errorf("resolver calls delta = %d, want 1", resolver.calls-priorCalls)
+	}
+	got := decodeBody[map[string]any](t, w)
+
+	// Origin: was just patched to LHR, table lookup fills it during UPDATE.
+	// The resolver's bogus 99.0 must NOT overwrite — BackfillFlight only
+	// touches empty columns.
+	if got["origin_lat"] == nil {
+		t.Fatalf("origin_lat should be table-filled (51.4775), got nil")
+	}
+	if ol := got["origin_lat"].(float64); ol != 51.4775 {
+		t.Errorf("origin_lat = %v, want 51.4775 (LHR table value, NOT resolver's 99)", ol)
+	}
+	// Dest: still unknown, resolver supplies the value.
+	if got["dest_lat"] == nil {
+		t.Fatalf("dest_lat should be resolver-filled, got nil")
+	}
+	if dl := got["dest_lat"].(float64); dl != 12.3456 {
+		t.Errorf("dest_lat = %v, want 12.3456", dl)
+	}
+}
