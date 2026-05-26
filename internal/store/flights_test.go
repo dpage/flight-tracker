@@ -725,3 +725,54 @@ func TestListVisibleFlights_ShowOldFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestFlightsWithMissingCoords(t *testing.T) {
+	s := newStore(t)
+	uid := mkUser(t, s)
+	now := time.Now()
+
+	// (a) Fully filled: LHR / JFK (both in embedded airports table).
+	a, err := s.CreateFlight(ctx, CreateFlightPayload{
+		Ident: "AAA1", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
+		OriginIATA: "LHR", DestIATA: "JFK",
+	}, uid)
+	if err != nil {
+		t.Fatalf("create a: %v", err)
+	}
+
+	// (b) Dest IATA unknown to the table → dest_lat / dest_lon NULL.
+	b, err := s.CreateFlight(ctx, CreateFlightPayload{
+		Ident: "BBB1", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
+		OriginIATA: "LHR", DestIATA: "ZZZ",
+	}, uid)
+	if err != nil {
+		t.Fatalf("create b: %v", err)
+	}
+
+	// (c) Both IATAs unknown → all four coord columns NULL.
+	c, err := s.CreateFlight(ctx, CreateFlightPayload{
+		Ident: "CCC1", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
+		OriginIATA: "QQQ", DestIATA: "ZZZ",
+	}, uid)
+	if err != nil {
+		t.Fatalf("create c: %v", err)
+	}
+
+	got, err := s.FlightsWithMissingCoords(ctx)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	gotIDs := map[int64]bool{}
+	for _, f := range got {
+		gotIDs[f.ID] = true
+	}
+	if gotIDs[a.ID] {
+		t.Errorf("fully-filled flight %d should NOT be returned", a.ID)
+	}
+	if !gotIDs[b.ID] {
+		t.Errorf("dest-NULL flight %d should be returned", b.ID)
+	}
+	if !gotIDs[c.ID] {
+		t.Errorf("both-NULL flight %d should be returned", c.ID)
+	}
+}

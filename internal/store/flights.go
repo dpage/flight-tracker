@@ -56,6 +56,32 @@ func (s *Store) ListFlights(ctx context.Context) ([]*Flight, error) {
 	return out, rows.Err()
 }
 
+// FlightsWithMissingCoords returns every flight that has at least one
+// NULL coord column. Used by the periodic NULL-coord sweep to find rows
+// the embedded airports table or the resolver might now be able to
+// satisfy. Terminal-status flights are NOT excluded — historical routes
+// still want coords for the map view.
+func (s *Store) FlightsWithMissingCoords(ctx context.Context) ([]*Flight, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+flightColumns+` FROM flights
+		WHERE origin_lat IS NULL OR origin_lon IS NULL
+		   OR dest_lat   IS NULL OR dest_lon   IS NULL
+		ORDER BY scheduled_out ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Flight
+	for rows.Next() {
+		f, err := scanFlight(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) FlightByID(ctx context.Context, id int64) (*Flight, error) {
 	return scanFlight(s.pool.QueryRow(ctx,
 		`SELECT `+flightColumns+` FROM flights WHERE id = $1`, id))
