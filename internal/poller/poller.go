@@ -36,17 +36,25 @@ func (p *Poller) Run(ctx context.Context) {
 	slog.Info("poller started", "interval", p.Interval)
 	defer slog.Info("poller stopped")
 
+	// Startup sweep: fill any NULL coord columns the latest deploy's
+	// airports table can now satisfy, before the main poll loop starts.
+	p.Sweep(ctx)
+
 	// Tick immediately on startup so a fresh server doesn't look stale.
 	p.tick(ctx)
 
-	t := time.NewTicker(p.Interval)
-	defer t.Stop()
+	mainT := time.NewTicker(p.Interval)
+	defer mainT.Stop()
+	sweepT := time.NewTicker(sweepInterval)
+	defer sweepT.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-mainT.C:
 			p.tick(ctx)
+		case <-sweepT.C:
+			p.Sweep(ctx)
 		}
 	}
 }
