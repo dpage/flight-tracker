@@ -50,6 +50,8 @@ func (p *Poller) Sweep(ctx context.Context) {
 
 // sweepOne runs the table + (later) resolver passes for a single flight
 // row. Extracted so a failure on one row doesn't unwind the whole loop.
+// The now parameter is unused in this commit; it's reserved for the
+// upcoming resolver throttle check that compares against f.LastResolvedAt.
 func (p *Poller) sweepOne(ctx context.Context, f *store.Flight, now time.Time) {
 	var update store.BackfillPayload
 	changed := false
@@ -101,7 +103,11 @@ func (p *Poller) publishFlightChange(ctx context.Context, id int64) {
 	}
 	var visible []int64
 	if !fresh.IsPublic {
-		visible, _ = p.Store.VisibleUserIDs(ctx, fresh.ID)
+		v, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
+		if err != nil {
+			slog.Warn("sweep: visibility lookup failed", "id", fresh.ID, "err", err)
+		}
+		visible = v
 	}
 	p.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }
