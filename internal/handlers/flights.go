@@ -136,9 +136,7 @@ func (a *API) createFlight(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if a.Resolver != nil && needsCoordBackfill(f) {
-		f = a.backfillCoordsIfNeeded(r.Context(), f)
-	}
+	f = a.backfillCoordsIfNeeded(r.Context(), f)
 	for _, uid := range in.PassengerIDs {
 		if err := a.Store.AddPassenger(r.Context(), f.ID, uid); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -450,17 +448,19 @@ func needsCoordBackfill(f *store.Flight) bool {
 		f.DestLat == nil || f.DestLon == nil
 }
 
-// backfillCoordsIfNeeded synchronously resolves the flight via a.Resolver
-// and writes any coords / airframe / notes the resolver returned through
-// Store.BackfillFlight (which only fills empty columns, preserving
-// user-typed values). On any error the row stays as-is and we return f
-// unchanged — the create/update HTTP request still succeeds, just with a
+// backfillCoordsIfNeeded is a no-op when no Resolver is configured or
+// when the flight already has every coord column populated (the table
+// fast path). Otherwise it synchronously resolves the flight via
+// a.Resolver and writes any coords / airframe / notes the resolver
+// returned through Store.BackfillFlight, which only fills empty columns
+// so user-typed values survive. On any error the row stays as-is and we
+// return f unchanged — the create request still succeeds, just with a
 // "no map" pill until the poller catches up later. Mirrors the path the
 // poller uses at poller.resolveAndUpdate.
-//
-// Callers must gate on a.Resolver != nil and needsCoordBackfill(f);
-// this helper assumes both are true on entry.
 func (a *API) backfillCoordsIfNeeded(ctx context.Context, f *store.Flight) *store.Flight {
+	if a.Resolver == nil || !needsCoordBackfill(f) {
+		return f
+	}
 	rf, err := a.Resolver.Resolve(ctx, f.Ident, f.ScheduledOut)
 	if err != nil {
 		slog.Warn("handlers: resolve for coord backfill failed",
