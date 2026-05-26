@@ -136,6 +136,9 @@ func (a *API) createFlight(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if a.Resolver != nil && needsCoordBackfill(f) {
+		f = a.backfillCoordsIfNeeded(r.Context(), f)
+	}
 	for _, uid := range in.PassengerIDs {
 		if err := a.Store.AddPassenger(r.Context(), f.ID, uid); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -437,6 +440,48 @@ func (a *API) publishFlightByID(ctx context.Context, id int64) {
 	latest, _ := a.Store.LatestPositions(ctx, []int64{id})
 	tracks, _ := a.Store.RecentTracks(ctx, []int64{id}, 200)
 	a.publishFlightDTO(ctx, api.ToFlightDTO(f, passengers[id], shares[id], latest[id], tracks[id]))
+}
+
+// needsCoordBackfill is true when any of the four coord columns is NULL
+// on the flight row — typically because the user supplied an IATA that
+// isn't in the embedded airports table.
+func needsCoordBackfill(f *store.Flight) bool {
+	return f.OriginLat == nil || f.OriginLon == nil ||
+		f.DestLat == nil || f.DestLon == nil
+}
+
+// backfillCoordsIfNeeded synchronously resolves the flight via a.Resolver
+// and writes any coords / airframe / notes the resolver returned through
+// Store.BackfillFlight (which only fills empty columns, preserving
+// user-typed values). On any error the row stays as-is and we return f
+// unchanged — the create/update HTTP request still succeeds, just with a
+// "no map" pill until the poller catches up later. Mirrors the path the
+// poller uses at poller.resolveAndUpdate.
+//
+// Callers must gate on a.Resolver != nil and needsCoordBackfill(f);
+// this helper assumes both are true on entry.
+func (a *API) backfillCoordsIfNeeded(ctx context.Context, f *store.Flight) *store.Flight {
+	rf, err := a.Resolver.Resolve(ctx, f.Ident, f.ScheduledOut)
+	if err != nil {
+		slog.Warn("handlers: resolve for coord backfill failed",
+			"ident", f.Ident, "id", f.ID, "err", err)
+		return f
+	}
+	if err := a.Store.BackfillFlight(ctx, f.ID, store.BackfillPayload{
+		OriginIATA: rf.OriginIATA, OriginLat: rf.OriginLat, OriginLon: rf.OriginLon,
+		DestIATA:   rf.DestIATA, DestLat: rf.DestLat, DestLon: rf.DestLon,
+		ICAO24:     rf.ICAO24, Callsign: rf.Callsign,
+		Notes: rf.Notes,
+	}); err != nil {
+		slog.Error("handlers: coord backfill write failed", "id", f.ID, "err", err)
+		return f
+	}
+	fresh, err := a.Store.FlightByID(ctx, f.ID)
+	if err != nil {
+		slog.Error("handlers: refetch after coord backfill", "id", f.ID, "err", err)
+		return f
+	}
+	return fresh
 }
 
 // publishFlightDelete fans a flight.deleted SSE event so connected clients

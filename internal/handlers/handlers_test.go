@@ -719,6 +719,41 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
+func TestCreateFlight_UnknownDestBackfilledFromResolver(t *testing.T) {
+	cfg := &config.Config{AeroDataBoxKey: "k"}
+	resolver := &fakeResolver{rf: &providers.ResolvedFlight{
+		Ident:      "BA286",
+		OriginIATA: "LHR", OriginLat: 51.4775, OriginLon: -0.4614,
+		DestIATA: "ZZZ", DestLat: 12.3456, DestLon: -34.5678,
+		Notes: "British Airways · Boeing 777",
+	}}
+	e := setup(t, resolver, cfg)
+	uid := e.user(t, "pilot", false)
+	now := time.Now()
+
+	body := map[string]any{
+		"ident":         "BA286",
+		"scheduled_out": now.Add(-time.Hour),
+		"scheduled_in":  now.Add(time.Hour),
+		"origin_iata":   "LHR",
+		"dest_iata":     "ZZZ", // not in embedded table
+	}
+	w := e.req(t, "POST", "/api/flights", body, uid)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", w.Code, w.Body.String())
+	}
+	if resolver.calls != 1 {
+		t.Errorf("resolver calls = %d, want 1", resolver.calls)
+	}
+	got := decodeBody[map[string]any](t, w)
+	if got["dest_lat"] == nil || got["dest_lon"] == nil {
+		t.Fatalf("dest_lat/lon should be populated from resolver; got %v", got)
+	}
+	if dl := got["dest_lat"].(float64); dl != 12.3456 {
+		t.Errorf("dest_lat = %v, want 12.3456 (resolver-supplied)", dl)
+	}
+}
+
 func TestWriteHelpers(t *testing.T) {
 	w := httptest.NewRecorder()
 	writeJSON(w, http.StatusTeapot, map[string]int{"a": 1})
