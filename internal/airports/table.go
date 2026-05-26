@@ -192,6 +192,7 @@ var table = map[string]Entry{
 	"ADD": {8.9779, 38.7993, "Addis Ababa", "Africa/Addis_Ababa"},
 	"LOS": {6.5774, 3.3215, "Lagos", "Africa/Lagos"},
 	"CMN": {33.3675, -7.5898, "Casablanca", "Africa/Casablanca"},
+	"SID": {16.7414, -22.9494, "Sal Amílcar Cabral", "Atlantic/Cape_Verde"},
 
 	// Asia
 	"SIN": {1.3644, 103.9915, "Singapore Changi", "Asia/Singapore"},
