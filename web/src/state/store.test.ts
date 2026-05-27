@@ -52,7 +52,7 @@ function flight(over: Partial<Flight> = {}): Flight {
 function user(over: Partial<User> = {}): User {
   return {
     id: 1,
-    github_login: 'octocat',
+    username: 'octocat',
     name: 'Octo',
     avatar_url: '',
     is_superuser: false,
@@ -460,9 +460,9 @@ describe('setShowMineOnly', () => {
 
 describe('user mutations', () => {
   it('inviteUser appends and sorts by login (case-insensitive)', async () => {
-    useStore.setState({ users: [user({ id: 1, github_login: 'Zed' })] });
-    mockApi.inviteUser.mockResolvedValue(user({ id: 2, github_login: 'abc' }));
-    await useStore.getState().inviteUser({ github_login: 'abc' });
+    useStore.setState({ users: [user({ id: 1, username: 'Zed' })] });
+    mockApi.inviteUser.mockResolvedValue(user({ id: 2, username: 'abc' }));
+    await useStore.getState().inviteUser({ username: 'abc' });
     expect(useStore.getState().users.map((u) => u.id)).toEqual([2, 1]);
   });
 

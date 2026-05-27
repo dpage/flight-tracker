@@ -20,7 +20,7 @@ func TestInsertEmailIngest_Minimum(t *testing.T) {
 
 func TestInsertEmailIngest_FullFields(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 
 	msgID := "<abc@example.com>"
 	id, err := s.InsertEmailIngest(ctx, EmailIngestPayload{

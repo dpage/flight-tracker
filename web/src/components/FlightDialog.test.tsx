@@ -72,7 +72,7 @@ import FlightDialog from './FlightDialog';
 function user(over: Partial<User> = {}): User {
   return {
     id: 1,
-    github_login: 'octocat',
+    username: 'octocat',
     name: 'Octo',
     avatar_url: '',
     is_superuser: false,
@@ -111,7 +111,7 @@ beforeEach(() => {
 describe('FlightDialog - full form (create)', () => {
   it('renders the full form when resolver unavailable and creates a flight', async () => {
     h.state.capabilities = { resolver_available: false };
-    h.state.users = [user({ id: 9, github_login: 'amy' })];
+    h.state.users = [user({ id: 9, username: 'amy' })];
     h.state.createFlight.mockResolvedValue(undefined);
     const onClose = vi.fn();
     render(<FlightDialog open editId={null} onClose={onClose} />);
@@ -175,7 +175,7 @@ describe('FlightDialog - full form (create)', () => {
   });
 
   it('sends share-with-everyone and explicit share-list IDs through createFlight', async () => {
-    h.state.users = [user({ id: 11, github_login: 'alice' }), user({ id: 22, github_login: 'bob' })];
+    h.state.users = [user({ id: 11, username: 'alice' }), user({ id: 22, username: 'bob' })];
     h.state.createFlight.mockResolvedValue(undefined);
     render(<FlightDialog open editId={null} onClose={vi.fn()} />);
     await userEvent.type(screen.getByLabelText(/^Flight number/), 'X1');
@@ -290,7 +290,7 @@ describe('FlightDialog - minimal form', () => {
   });
 
   it('renders selected passenger chips in the minimal form (renderTags/getOptionLabel)', async () => {
-    h.state.users = [user({ id: 1, github_login: 'amy' }), user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 1, username: 'amy' }), user({ id: 2, username: 'bob' })];
     render(<FlightDialog open editId={null} onClose={vi.fn()} />);
     const auto = screen.getByLabelText('Passengers');
     await userEvent.click(auto);
@@ -358,7 +358,7 @@ describe('FlightDialog - editing', () => {
       passenger_ids: [1],
     });
     h.state.flights = [f];
-    h.state.users = [user({ id: 1, github_login: 'amy' }), user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 1, username: 'amy' }), user({ id: 2, username: 'bob' })];
     h.state.updateFlight.mockResolvedValue(undefined);
     h.state.addPassenger.mockResolvedValue(undefined);
     h.state.removePassenger.mockResolvedValue(undefined);
@@ -406,7 +406,7 @@ describe('FlightDialog - editing', () => {
   it('adds and removes passengers on edit', async () => {
     const f = flight({ id: 8, passenger_ids: [1] });
     h.state.flights = [f];
-    h.state.users = [user({ id: 1, github_login: 'amy' }), user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 1, username: 'amy' }), user({ id: 2, username: 'bob' })];
     h.state.updateFlight.mockResolvedValue(undefined);
     h.state.addPassenger.mockResolvedValue(undefined);
     h.state.removePassenger.mockResolvedValue(undefined);
@@ -477,7 +477,7 @@ describe('FlightDialog - editing', () => {
   it('diffs share-list adds and removes through addShare/removeShare', async () => {
     const me = user({ id: 99 });
     h.state.me = me;
-    h.state.users = [user({ id: 11, github_login: 'alice' }), user({ id: 22, github_login: 'bob' })];
+    h.state.users = [user({ id: 11, username: 'alice' }), user({ id: 22, username: 'bob' })];
     const f = flight({ id: 7, created_by: 99, shared_user_ids: [11] });
     h.state.flights = [f];
     render(<FlightDialog open editId={7} onClose={vi.fn()} />);

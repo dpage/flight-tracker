@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL     string
 	GitHubID        string
 	GitHubSecret    string
+	GoogleID        string
+	GoogleSecret    string
 	SessionKey      []byte
 	OpenSkyUsername string
 	OpenSkyPassword string
@@ -52,6 +54,8 @@ func Load() (*Config, error) {
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		GitHubID:        os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubSecret:    os.Getenv("GITHUB_CLIENT_SECRET"),
+		GoogleID:        os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleSecret:    os.Getenv("GOOGLE_CLIENT_SECRET"),
 		OpenSkyUsername: os.Getenv("OPENSKY_USERNAME"),
 		OpenSkyPassword: os.Getenv("OPENSKY_PASSWORD"),
 		OpenSkyEnabled:  os.Getenv("OPENSKY_ENABLED") == "1",
@@ -70,13 +74,19 @@ func Load() (*Config, error) {
 	if cfg.DatabaseURL == "" {
 		missing = append(missing, "DATABASE_URL")
 	}
-	if !cfg.DevAuthBypass {
-		if cfg.GitHubID == "" {
-			missing = append(missing, "GITHUB_CLIENT_ID")
-		}
-		if cfg.GitHubSecret == "" {
-			missing = append(missing, "GITHUB_CLIENT_SECRET")
-		}
+	// OAuth: each provider is optional, but at least one must be fully
+	// configured (or DEV_AUTH_BYPASS must be on). A half-configured
+	// provider — ID without secret or vice versa — is an error since the
+	// flow would 500 on first sign-in.
+	if (cfg.GitHubID == "") != (cfg.GitHubSecret == "") {
+		return nil, fmt.Errorf("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together")
+	}
+	if (cfg.GoogleID == "") != (cfg.GoogleSecret == "") {
+		return nil, fmt.Errorf("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together")
+	}
+	if !cfg.DevAuthBypass && cfg.GitHubID == "" && cfg.GoogleID == "" {
+		return nil, fmt.Errorf("at least one OAuth provider must be configured " +
+			"(set GITHUB_CLIENT_ID+SECRET and/or GOOGLE_CLIENT_ID+SECRET)")
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required env: %s", strings.Join(missing, ", "))

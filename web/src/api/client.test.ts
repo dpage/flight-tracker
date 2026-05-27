@@ -200,7 +200,7 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
   });
 
   it('inviteUser', async () => {
-    await api.inviteUser({ github_login: 'oct' });
+    await api.inviteUser({ username: 'oct' });
     expect(last()[0]).toBe('/api/users');
     expect(last()[1]?.method).toBe('POST');
   });

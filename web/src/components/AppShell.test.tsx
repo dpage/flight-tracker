@@ -72,7 +72,7 @@ import AppShell from './AppShell';
 function user(over: Partial<User> = {}): User {
   return {
     id: 1,
-    github_login: 'octocat',
+    username: 'octocat',
     name: 'Octo',
     avatar_url: '',
     is_superuser: false,

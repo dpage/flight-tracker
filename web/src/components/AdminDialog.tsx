@@ -54,7 +54,7 @@ export default function AdminDialog({ open, onClose }: Props) {
     if (!login.trim()) return;
     setBusy(true);
     try {
-      await inviteUser({ github_login: login.trim(), name: name.trim(), is_superuser: makeAdmin });
+      await inviteUser({ username: login.trim(), name: name.trim(), is_superuser: makeAdmin });
       setLogin('');
       setName('');
       setMakeAdmin(false);
@@ -74,7 +74,7 @@ export default function AdminDialog({ open, onClose }: Props) {
       setError(err instanceof Error ? err.message : String(err)),
     );
   const onDelete = (u: User) => {
-    if (confirm(`Delete ${u.github_login}?`)) void deleteUser(u.id);
+    if (confirm(`Delete ${u.username}?`)) void deleteUser(u.id);
   };
 
   return (
@@ -89,7 +89,7 @@ export default function AdminDialog({ open, onClose }: Props) {
             flexWrap="wrap"
           >
             <TextField
-              label="GitHub login"
+              label="Username"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
               size="small"
@@ -156,11 +156,11 @@ export default function AdminDialog({ open, onClose }: Props) {
                       <TableCell>
                         <Stack direction="row" spacing={1} alignItems="center">
                           <Avatar src={u.avatar_url} sx={{ width: 28, height: 28 }}>
-                            {u.github_login.charAt(0).toUpperCase()}
+                            {u.username.charAt(0).toUpperCase()}
                           </Avatar>
                           <Stack>
                             <Typography variant="body2">
-                              {u.github_login}
+                              {u.username}
                               {isMe && (
                                 <Chip label="you" size="small" sx={{ ml: 1 }} variant="outlined" />
                               )}
@@ -236,12 +236,12 @@ function UserCard({ user, isMe, onToggleSuperuser, onToggleActive, onDelete }: U
     <Box sx={{ py: 1.25 }}>
       <Stack direction="row" spacing={1.5} alignItems="flex-start">
         <Avatar src={user.avatar_url} sx={{ width: 36, height: 36, mt: 0.25 }}>
-          {user.github_login.charAt(0).toUpperCase()}
+          {user.username.charAt(0).toUpperCase()}
         </Avatar>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap">
             <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-              {user.github_login}
+              {user.username}
             </Typography>
             {isMe && <Chip label="you" size="small" variant="outlined" />}
             {!user.has_logged_in && (

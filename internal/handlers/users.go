@@ -22,7 +22,7 @@ func (a *API) listUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 type inviteReq struct {
-	GitHubLogin string `json:"github_login"`
+	Username    string `json:"username"`
 	Name        string `json:"name"`
 	IsSuperuser bool   `json:"is_superuser"`
 }
@@ -34,7 +34,7 @@ func (a *API) inviteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := a.Store.InviteUser(r.Context(), store.InvitePayload{
-		GitHubLogin: in.GitHubLogin,
+		Username:    in.Username,
 		Name:        in.Name,
 		IsSuperuser: in.IsSuperuser,
 	})

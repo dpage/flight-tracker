@@ -9,16 +9,16 @@ import (
 )
 
 // InsertUser inserts a user row directly and returns its id.
-func InsertUser(t *testing.T, pool *pgxpool.Pool, login string, superuser, active bool) int64 {
+func InsertUser(t *testing.T, pool *pgxpool.Pool, username string, superuser, active bool) int64 {
 	t.Helper()
 	var id int64
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO users (github_login, name, is_superuser, is_active)
+		INSERT INTO users (username, name, is_superuser, is_active)
 		VALUES ($1, $1, $2, $3) RETURNING id`,
-		login, superuser, active,
+		username, superuser, active,
 	).Scan(&id)
 	if err != nil {
-		t.Fatalf("insert user %q: %v", login, err)
+		t.Fatalf("insert user %q: %v", username, err)
 	}
 	return id
 }

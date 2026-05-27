@@ -5,29 +5,29 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dpage/aerly/internal/store"
 )
 
 // RegisterDevLogin attaches GET /auth/dev-login?login=foo, which fabricates a
-// GitHub identity and creates a session — bypassing OAuth entirely. It is the
-// caller's responsibility to gate this on DEV_AUTH_BYPASS + localhost.
+// synthetic identity and creates a session — bypassing OAuth entirely. It is
+// the caller's responsibility to gate this on DEV_AUTH_BYPASS + localhost.
 //
 // Also attaches GET /auth/dev-info — an unauthenticated probe the SPA's login
 // page uses to decide whether to render the dev-login form. When dev bypass is
 // off the route isn't registered and the probe 404s.
 //
-// Synthetic GitHub IDs are negative (real ones are positive) so dev users
-// never collide with real GitHub accounts.
+// Synthetic identity rows use the "dev" provider, so they can never collide
+// with real GitHub or Google identities.
 func (h *Handler) RegisterDevLogin(mux *http.ServeMux) {
 	slog.Warn("DEV_AUTH_BYPASS enabled — /auth/dev-login active. Do not use in production.")
 	mux.HandleFunc("GET /auth/dev-login", h.devLogin)
 	mux.HandleFunc("GET /auth/dev-info", h.devInfo)
 }
 
-func (h *Handler) devInfo(w http.ResponseWriter, r *http.Request) {
-	_ = r
+func (h *Handler) devInfo(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": true})
 }
@@ -35,15 +35,16 @@ func (h *Handler) devInfo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) devLogin(w http.ResponseWriter, r *http.Request) {
 	login := strings.TrimSpace(r.URL.Query().Get("login"))
 	if login == "" {
-		http.Error(w, "missing ?login=<github-login>", http.StatusBadRequest)
+		http.Error(w, "missing ?login=<username>", http.StatusBadRequest)
 		return
 	}
 
-	profile := store.GitHubProfile{
-		ID:        devSyntheticID(login),
-		Login:     login,
-		Name:      login,
-		AvatarURL: "https://github.com/" + login + ".png",
+	profile := store.OAuthProfile{
+		Provider:       "dev",
+		ProviderUserID: strconv.FormatUint(devSyntheticID(login), 10),
+		Username:       login,
+		Name:           login,
+		AvatarURL:      "https://github.com/" + login + ".png",
 	}
 	count, err := h.Store.CountUsers(r.Context())
 	if err != nil {
@@ -59,9 +60,10 @@ func (h *Handler) devLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func devSyntheticID(login string) int64 {
+// devSyntheticID hashes the login into a stable identifier so the same dev
+// login always maps to the same user_identities row across server restarts.
+func devSyntheticID(login string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(strings.ToLower(login)))
-	v := h.Sum64() & 0x7fffffffffffffff
-	return -int64(v) - 1
+	return h.Sum64()
 }

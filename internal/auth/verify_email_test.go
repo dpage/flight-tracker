@@ -15,7 +15,7 @@ func newAuthHandler(t *testing.T) (*Handler, *store.Store) {
 	t.Helper()
 	pool := testsupport.NewPool(t)
 	s := store.New(pool)
-	return NewHandler("cid", "csec", []byte("verify-email-test-session-key!!!!!"), "http://localhost:8080", s), s
+	return NewHandler([]byte("verify-email-test-session-key!!!!!"), "http://localhost:8080", s), s
 }
 
 func TestVerifyEmail_HappyPath(t *testing.T) {
@@ -23,7 +23,7 @@ func TestVerifyEmail_HappyPath(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	u, err := s.InviteUser(context.Background(), store.InvitePayload{GitHubLogin: "alice"})
+	u, err := s.InviteUser(context.Background(), store.InvitePayload{Username: "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}

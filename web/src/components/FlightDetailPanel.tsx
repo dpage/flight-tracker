@@ -240,9 +240,9 @@ function UserChip({ user }: { user: User }) {
   return (
     <Stack direction="row" spacing={0.75} alignItems="center">
       <Avatar src={user.avatar_url} sx={{ width: 20, height: 20, fontSize: 11 }}>
-        {user.github_login.charAt(0).toUpperCase()}
+        {user.username.charAt(0).toUpperCase()}
       </Avatar>
-      <Typography variant="body2">{user.github_login}</Typography>
+      <Typography variant="body2">{user.username}</Typography>
     </Stack>
   );
 }

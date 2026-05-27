@@ -8,14 +8,13 @@ import (
 )
 
 func TestToUserDTO(t *testing.T) {
-	gid := int64(99)
 	last := time.Now()
 	u := &store.User{
-		ID: 1, GitHubID: &gid, GitHubLogin: "octocat", Name: "Octo",
+		ID: 1, Username: "octocat", Name: "Octo",
 		AvatarURL: "a.png", IsSuperuser: true, IsActive: true, LastLoginAt: &last,
 	}
 	d := ToUserDTO(u)
-	if d.ID != 1 || d.GitHubLogin != "octocat" || !d.IsSuperuser || !d.HasLoggedIn {
+	if d.ID != 1 || d.Username != "octocat" || !d.IsSuperuser || !d.HasLoggedIn {
 		t.Errorf("unexpected dto: %+v", d)
 	}
 	if d.LastLoginAt == nil || !d.LastLoginAt.Equal(last) {
@@ -24,10 +23,10 @@ func TestToUserDTO(t *testing.T) {
 }
 
 func TestToUserDTONeverLoggedIn(t *testing.T) {
-	u := &store.User{ID: 2, GitHubLogin: "invitee"} // GitHubID nil
+	u := &store.User{ID: 2, Username: "invitee"} // LastLoginAt nil
 	d := ToUserDTO(u)
 	if d.HasLoggedIn {
-		t.Error("HasLoggedIn should be false when GitHubID is nil")
+		t.Error("HasLoggedIn should be false when LastLoginAt is nil")
 	}
 }
 

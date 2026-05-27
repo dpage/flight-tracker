@@ -337,7 +337,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
               multiple
               options={users}
               value={minimal.passengers}
-              getOptionLabel={(o) => o.github_login}
+              getOptionLabel={(o) => o.username}
               isOptionEqualToValue={(a, b) => a.id === b.id}
               onChange={(_, value) => setMinimal({ ...minimal, passengers: value })}
               renderTags={(value, getTagProps) =>
@@ -347,10 +347,10 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
                     key={u.id}
                     avatar={
                       <Avatar src={u.avatar_url}>
-                        {u.github_login.charAt(0).toUpperCase()}
+                        {u.username.charAt(0).toUpperCase()}
                       </Avatar>
                     }
-                    label={u.github_login}
+                    label={u.username}
                   />
                 ))
               }
@@ -465,7 +465,7 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
               multiple
               options={users}
               value={form.passengers}
-              getOptionLabel={(o) => o.github_login}
+              getOptionLabel={(o) => o.username}
               isOptionEqualToValue={(a, b) => a.id === b.id}
               onChange={(_, value) => setForm({ ...form, passengers: value })}
               renderTags={(value, getTagProps) =>
@@ -475,10 +475,10 @@ export default function FlightDialog({ open, editId, onClose }: Props) {
                     key={u.id}
                     avatar={
                       <Avatar src={u.avatar_url}>
-                        {u.github_login.charAt(0).toUpperCase()}
+                        {u.username.charAt(0).toUpperCase()}
                       </Avatar>
                     }
-                    label={u.github_login}
+                    label={u.username}
                   />
                 ))
               }
@@ -605,7 +605,7 @@ function VisibilityBlock({
         multiple
         options={users}
         value={sharedWith}
-        getOptionLabel={(o) => o.github_login}
+        getOptionLabel={(o) => o.username}
         isOptionEqualToValue={(a, b) => a.id === b.id}
         onChange={(_, value) => onSharedChange(value)}
         disabled={disabled}
@@ -614,8 +614,8 @@ function VisibilityBlock({
             <Chip
               {...getTagProps({ index: i })}
               key={u.id}
-              avatar={<Avatar src={u.avatar_url}>{u.github_login.charAt(0).toUpperCase()}</Avatar>}
-              label={u.github_login}
+              avatar={<Avatar src={u.avatar_url}>{u.username.charAt(0).toUpperCase()}</Avatar>}
+              label={u.username}
             />
           ))
         }

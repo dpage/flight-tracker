@@ -9,12 +9,12 @@ import (
 	"github.com/dpage/aerly/internal/testsupport"
 )
 
-func TestDevSyntheticIDNegativeAndStable(t *testing.T) {
+func TestDevSyntheticIDStable(t *testing.T) {
 	a := devSyntheticID("Alice")
 	b := devSyntheticID("alice") // case-insensitive
 	c := devSyntheticID("bob")
-	if a >= 0 {
-		t.Errorf("synthetic id should be negative, got %d", a)
+	if a == 0 {
+		t.Errorf("synthetic id should be non-zero, got %d", a)
 	}
 	if a != b {
 		t.Errorf("synthetic id should be case-insensitive: %d vs %d", a, b)

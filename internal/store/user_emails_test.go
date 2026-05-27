@@ -8,7 +8,7 @@ import (
 
 func TestUpsertVerifiedEmail_Insert(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 
 	if err := s.UpsertVerifiedEmail(ctx, u.ID, "Alice@Example.com"); err != nil {
 		t.Fatalf("UpsertVerifiedEmail: %v", err)
@@ -24,7 +24,7 @@ func TestUpsertVerifiedEmail_Insert(t *testing.T) {
 
 func TestUpsertVerifiedEmail_TrimsWhitespace(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	if err := s.UpsertVerifiedEmail(ctx, u.ID, "  alice@example.com  "); err != nil {
 		t.Fatalf("UpsertVerifiedEmail: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestUpsertVerifiedEmail_TrimsWhitespace(t *testing.T) {
 
 func TestUpsertVerifiedEmail_EmptyRejected(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	if err := s.UpsertVerifiedEmail(ctx, u.ID, "   "); err == nil {
 		t.Error("expected error for empty address")
 	}
@@ -43,7 +43,7 @@ func TestUpsertVerifiedEmail_EmptyRejected(t *testing.T) {
 
 func TestUpsertVerifiedEmail_IdempotentSameUser(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 
 	for i := 0; i < 3; i++ {
 		if err := s.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
@@ -64,8 +64,8 @@ func TestUpsertVerifiedEmail_IdempotentSameUser(t *testing.T) {
 
 func TestUpsertVerifiedEmail_OtherUserRejected(t *testing.T) {
 	s := newStore(t)
-	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
-	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	u1, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{Username: "bob"})
 
 	if err := s.UpsertVerifiedEmail(ctx, u1.ID, "shared@example.com"); err != nil {
 		t.Fatalf("first: %v", err)
@@ -89,7 +89,7 @@ func TestUserByVerifiedEmail_NotFound(t *testing.T) {
 
 func TestUserByVerifiedEmail_RequiresVerified(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	// Manually insert an unverified row, bypassing UpsertVerifiedEmail.
 	if _, err := s.pool.Exec(ctx,
 		`INSERT INTO user_emails (user_id, address, verified) VALUES ($1,$2,FALSE)`,
@@ -103,7 +103,7 @@ func TestUserByVerifiedEmail_RequiresVerified(t *testing.T) {
 
 func TestEmailsByUser_Empty(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	got, err := s.EmailsByUser(ctx, u.ID)
 	if err != nil {
 		t.Fatalf("EmailsByUser: %v", err)
@@ -115,7 +115,7 @@ func TestEmailsByUser_Empty(t *testing.T) {
 
 func TestEmailsByUser_MultipleNewestFirst(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	if err := s.UpsertVerifiedEmail(ctx, u.ID, "first@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestEmailsByUser_MultipleNewestFirst(t *testing.T) {
 
 func TestInsertUnverifiedEmail_Insert(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 
 	e, token, err := s.InsertUnverifiedEmail(ctx, u.ID, "Alice@Example.com")
 	if err != nil {
@@ -159,7 +159,7 @@ func TestInsertUnverifiedEmail_Insert(t *testing.T) {
 
 func TestInsertUnverifiedEmail_TrimsAndRejectsEmpty(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 
 	if _, _, err := s.InsertUnverifiedEmail(ctx, u.ID, "   "); err == nil {
 		t.Error("expected error for empty address")
@@ -175,8 +175,8 @@ func TestInsertUnverifiedEmail_TrimsAndRejectsEmpty(t *testing.T) {
 
 func TestInsertUnverifiedEmail_ConflictReturnsErrAddressTaken(t *testing.T) {
 	s := newStore(t)
-	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
-	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	u1, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{Username: "bob"})
 
 	if _, _, err := s.InsertUnverifiedEmail(ctx, u1.ID, "shared@example.com"); err != nil {
 		t.Fatalf("first insert: %v", err)
@@ -189,7 +189,7 @@ func TestInsertUnverifiedEmail_ConflictReturnsErrAddressTaken(t *testing.T) {
 
 func TestResendVerification_RotatesToken(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	e, oldToken, err := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -209,8 +209,8 @@ func TestResendVerification_RotatesToken(t *testing.T) {
 
 func TestResendVerification_WrongUserNotFound(t *testing.T) {
 	s := newStore(t)
-	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
-	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	u1, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{Username: "bob"})
 	e, _, _ := s.InsertUnverifiedEmail(ctx, u1.ID, "alice@example.com")
 
 	_, _, err := s.ResendVerification(ctx, u2.ID, e.ID)
@@ -221,7 +221,7 @@ func TestResendVerification_WrongUserNotFound(t *testing.T) {
 
 func TestResendVerification_AlreadyVerified(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	if err := s.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestResendVerification_AlreadyVerified(t *testing.T) {
 
 func TestVerifyEmailByToken_HappyPath(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
 
 	got, err := s.VerifyEmailByToken(ctx, token)
@@ -251,7 +251,7 @@ func TestVerifyEmailByToken_HappyPath(t *testing.T) {
 
 func TestVerifyEmailByToken_SecondCallNotFound(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
 
 	if _, err := s.VerifyEmailByToken(ctx, token); err != nil {
@@ -273,7 +273,7 @@ func TestVerifyEmailByToken_BadToken(t *testing.T) {
 
 func TestVerifyEmailByToken_ExpiredTokenNotFound(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	_, token, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
 
 	// Backdate verify_sent_at to 25 hours ago to push the row past the TTL.
@@ -290,7 +290,7 @@ func TestVerifyEmailByToken_ExpiredTokenNotFound(t *testing.T) {
 
 func TestDeleteUserEmail_HappyPath(t *testing.T) {
 	s := newStore(t)
-	u, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
+	u, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
 	e, _, _ := s.InsertUnverifiedEmail(ctx, u.ID, "alice@example.com")
 
 	if err := s.DeleteUserEmail(ctx, u.ID, e.ID); err != nil {
@@ -304,8 +304,8 @@ func TestDeleteUserEmail_HappyPath(t *testing.T) {
 
 func TestDeleteUserEmail_WrongUserNotFound(t *testing.T) {
 	s := newStore(t)
-	u1, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "alice"})
-	u2, _ := s.InviteUser(ctx, InvitePayload{GitHubLogin: "bob"})
+	u1, _ := s.InviteUser(ctx, InvitePayload{Username: "alice"})
+	u2, _ := s.InviteUser(ctx, InvitePayload{Username: "bob"})
 	e, _, _ := s.InsertUnverifiedEmail(ctx, u1.ID, "alice@example.com")
 
 	if err := s.DeleteUserEmail(ctx, u2.ID, e.ID); !errors.Is(err, ErrNotFound) {

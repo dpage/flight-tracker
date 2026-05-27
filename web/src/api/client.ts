@@ -1,4 +1,5 @@
 import type {
+  AuthProvider,
   Capabilities,
   CreateFlightInput,
   Flight,
@@ -52,6 +53,23 @@ export const api = {
 
   getMe: () => request<User>('GET', '/api/me'),
   getConfig: () => request<Capabilities>('GET', '/api/config'),
+
+  // Lists the OAuth providers the backend has configured, so the login
+  // page can render one button per provider. Returns an empty list on
+  // network errors so the page can fall back to the dev-login form.
+  async getAuthProviders(): Promise<AuthProvider[]> {
+    try {
+      const res = await fetch('/auth/providers', {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) return [];
+      const j = (await res.json()) as { providers?: AuthProvider[] };
+      return j.providers ?? [];
+    } catch {
+      return [];
+    }
+  },
 
   // Probes the dev-only DEV_AUTH_BYPASS endpoint. Returns true when the
   // backend is running with DEV_AUTH_BYPASS=1 (the route only exists then),

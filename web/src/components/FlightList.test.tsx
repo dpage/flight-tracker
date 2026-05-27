@@ -62,7 +62,7 @@ function flight(over: Partial<Flight> = {}): Flight {
 function user(over: Partial<User> = {}): User {
   return {
     id: 1,
-    github_login: 'octocat',
+    username: 'octocat',
     name: 'Octo',
     avatar_url: '',
     is_superuser: false,
@@ -97,7 +97,7 @@ describe('FlightList', () => {
   });
 
   it('renders rows with route, schedule and passenger avatars', () => {
-    state.users = [user({ id: 9, github_login: 'amy' })];
+    state.users = [user({ id: 9, username: 'amy' })];
     state.flights = [flight({ passenger_ids: [9, 999], estimated_in: '2024-01-01T13:00:00Z' })];
     render(<FlightList onEditFlight={vi.fn()} />);
     expect(screen.getByText('BA1')).toBeInTheDocument();
@@ -179,7 +179,7 @@ describe('FlightList', () => {
   });
 
   it('shows the owner chip in the collapsed row when created_by maps to a known user', () => {
-    state.users = [user({ id: 7, github_login: 'dpage' })];
+    state.users = [user({ id: 7, username: 'dpage' })];
     state.flights = [flight({ created_by: 7 })];
     render(<FlightList onEditFlight={vi.fn()} />);
     expect(screen.getByText('dpage')).toBeInTheDocument();
@@ -211,7 +211,7 @@ describe('FlightList', () => {
   });
 
   it('detail panel lists "Shared with" users when shared_user_ids is set', () => {
-    state.users = [user({ id: 11, github_login: 'alice' }), user({ id: 22, github_login: 'bob' })];
+    state.users = [user({ id: 11, username: 'alice' }), user({ id: 22, username: 'bob' })];
     state.flights = [flight({ id: 5, shared_user_ids: [11, 22] })];
     state.selectedFlightId = 5;
     render(<FlightList onEditFlight={vi.fn()} />);
@@ -349,8 +349,8 @@ describe('FlightList', () => {
 
   it('detail panel shows passengers and owner chips when set', () => {
     state.users = [
-      user({ id: 11, github_login: 'alice' }),
-      user({ id: 22, github_login: 'bob' }),
+      user({ id: 11, username: 'alice' }),
+      user({ id: 22, username: 'bob' }),
     ];
     state.flights = [flight({ id: 5, passenger_ids: [11], created_by: 22 })];
     state.selectedFlightId = 5;

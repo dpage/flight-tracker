@@ -22,8 +22,7 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 type User struct {
 	ID          int64
-	GitHubID    *int64
-	GitHubLogin string
+	Username    string
 	Name        string
 	AvatarURL   string
 	IsSuperuser bool
@@ -31,6 +30,17 @@ type User struct {
 	LastLoginAt *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+// UserIdentity links a user to one external OAuth identity. A user may have
+// multiple rows (e.g. linked GitHub + Google), keyed by (Provider, ProviderUserID).
+type UserIdentity struct {
+	ID             int64
+	UserID         int64
+	Provider       string
+	ProviderUserID string
+	CreatedAt      time.Time
+	LastUsedAt     *time.Time
 }
 
 type Flight struct {

@@ -42,7 +42,7 @@ func newPoller(t *testing.T, tr *mockTracker, interval time.Duration) (*Poller, 
 
 func seedUser(t *testing.T, s *store.Store) int64 {
 	t.Helper()
-	u, err := s.InviteUser(context.Background(), store.InvitePayload{GitHubLogin: "po", Name: "po"})
+	u, err := s.InviteUser(context.Background(), store.InvitePayload{Username: "po", Name: "po"})
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}

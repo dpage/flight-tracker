@@ -316,7 +316,7 @@ function byScheduledOut(a: Flight, b: Flight) {
 }
 
 function byLogin(a: User, b: User) {
-  return a.github_login.toLowerCase().localeCompare(b.github_login.toLowerCase());
+  return a.username.toLowerCase().localeCompare(b.username.toLowerCase());
 }
 
 function errorMessage(err: unknown): string {
