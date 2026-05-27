@@ -58,6 +58,15 @@ vi.mock('./EmailsDialog', () => ({
       </div>
     ) : null,
 }));
+vi.mock('./FriendsDialog', () => ({
+  default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? (
+      <div>
+        FRIENDS_DIALOG
+        <button onClick={onClose}>CLOSE_FRIENDS_DIALOG</button>
+      </div>
+    ) : null,
+}));
 vi.mock('./StatsDialog', () => ({
   default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
     open ? (
