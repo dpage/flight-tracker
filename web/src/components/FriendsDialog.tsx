@@ -25,7 +25,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import { api } from '../api/client';
-import type { Friendship, User } from '../api/types';
+import type { User } from '../api/types';
 import { useStore } from '../state/store';
 
 interface Props {
@@ -53,9 +53,9 @@ const rowKey = (f: Friendship) =>
 export default function FriendsDialog({ open, onClose }: Props) {
   const setError = useStore((s) => s.setError);
   const users = useStore((s) => s.users);
+  const friends = useStore((s) => s.friendships);
+  const refreshFriendships = useStore((s) => s.refreshFriendships);
   const userIndex = useMemo(() => buildUserIndex(users), [users]);
-
-  const [friends, setFriends] = useState<Friendship[]>([]);
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -68,9 +68,9 @@ export default function FriendsDialog({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    void api.listFriends().then(setFriends).catch(reportError);
+    void refreshFriendships();
     setInviteFeedback(null);
-  }, [open, reportError]);
+  }, [open, refreshFriendships]);
 
   const handleInvite = async () => {
     const trimmed = email.trim();
@@ -79,8 +79,7 @@ export default function FriendsDialog({ open, onClose }: Props) {
     try {
       await api.inviteFriend({ email: trimmed, message: message.trim() || undefined });
       // Pull a fresh list so a newly-pending outgoing request shows up.
-      const updated = await api.listFriends();
-      setFriends(updated);
+      await refreshFriendships();
       setEmail('');
       setMessage('');
       // The server returns identical responses whether the email matched
@@ -99,8 +98,8 @@ export default function FriendsDialog({ open, onClose }: Props) {
 
   const handleAccept = async (other: number) => {
     try {
-      const updated = await api.acceptFriend(other);
-      setFriends((rows) => rows.map((r) => (r.friend_id === other ? updated : r)));
+      await api.acceptFriend(other);
+      await refreshFriendships();
     } catch (err) {
       reportError(err);
     }
@@ -110,7 +109,7 @@ export default function FriendsDialog({ open, onClose }: Props) {
     if (!window.confirm(`Remove ${label} from your friends?`)) return;
     try {
       await api.removeFriend(other);
-      setFriends((rows) => rows.filter((r) => r.friend_id !== other));
+      await refreshFriendships();
     } catch (err) {
       reportError(err);
     }

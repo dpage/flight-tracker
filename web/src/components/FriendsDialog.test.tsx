@@ -12,17 +12,12 @@ const h = vi.hoisted(() => ({
     removeFriend: vi.fn(),
     cancelOutgoingInvite: vi.fn(),
   },
-  setError: vi.fn(),
-  users: [] as User[],
 }));
 
 vi.mock('../api/client', () => ({ api: h.api }));
-vi.mock('../state/store', () => ({
-  useStore: (sel: (s: { setError: (m: string | null) => void; users: User[] }) => unknown) =>
-    sel({ setError: h.setError, users: h.users }),
-}));
 
 import FriendsDialog from './FriendsDialog';
+import { useStore } from '../state/store';
 
 function user(over: Partial<User> = {}): User {
   return {
@@ -47,9 +42,15 @@ function friend(over: Partial<Friendship> = {}): Friendship {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks clears both call history AND once-queues so there is no
+  // bleed-over of unconsumed mockResolvedValueOnce entries between tests.
+  vi.resetAllMocks();
   h.api.listFriends.mockResolvedValue([]);
-  h.users = [user({ id: 2, username: 'bob', name: 'Bob' })];
+  useStore.setState({
+    friendships: [],
+    users: [user({ id: 2, username: 'bob', name: 'Bob' })],
+    error: null,
+  });
 });
 
 describe('FriendsDialog', () => {
@@ -64,11 +65,13 @@ describe('FriendsDialog', () => {
         requested_at: new Date().toISOString(),
       },
     ]);
-    h.users = [
-      user({ id: 2, username: 'bob', name: 'Bob' }),
-      user({ id: 3, username: 'carol', name: 'Carol' }),
-      user({ id: 4, username: 'dan', name: 'Dan' }),
-    ];
+    useStore.setState({
+      users: [
+        user({ id: 2, username: 'bob', name: 'Bob' }),
+        user({ id: 3, username: 'carol', name: 'Carol' }),
+        user({ id: 4, username: 'dan', name: 'Dan' }),
+      ],
+    });
     render(<FriendsDialog open onClose={() => {}} />);
     await screen.findByText('Bob');
     expect(screen.getByText('Carol')).toBeInTheDocument();
@@ -119,15 +122,23 @@ describe('FriendsDialog', () => {
   it('accepts an incoming pending request and leaves siblings untouched', async () => {
     // Two incoming requests so the map callback inside handleAccept hits
     // both the matched and unmatched branches.
-    h.users = [
-      user({ id: 2, username: 'bob', name: 'Bob' }),
-      user({ id: 3, username: 'carol', name: 'Carol' }),
-    ];
-    h.api.listFriends.mockResolvedValue([
+    useStore.setState({
+      users: [
+        user({ id: 2, username: 'bob', name: 'Bob' }),
+        user({ id: 3, username: 'carol', name: 'Carol' }),
+      ],
+    });
+    // Call 1: initial render – both rows pending-incoming.
+    h.api.listFriends.mockResolvedValueOnce([
       friend({ friend_id: 2, status: 'pending', direction: 'incoming' }),
       friend({ friend_id: 3, status: 'pending', direction: 'incoming' }),
     ]);
     h.api.acceptFriend.mockResolvedValueOnce(friend({ friend_id: 2, status: 'accepted' }));
+    // Call 2: post-accept refresh – Bob is now accepted, Carol still pending.
+    h.api.listFriends.mockResolvedValueOnce([
+      friend({ friend_id: 2, status: 'accepted' }),
+      friend({ friend_id: 3, status: 'pending', direction: 'incoming' }),
+    ]);
     render(<FriendsDialog open onClose={() => {}} />);
     const acceptBtn = await screen.findByRole('button', { name: /accept bob/i });
     await userEvent.click(acceptBtn);
@@ -141,21 +152,26 @@ describe('FriendsDialog', () => {
     // Two accepted friends so the filter inside handleRemove exercises
     // both the keep and drop branches.
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    h.users = [
-      user({ id: 2, username: 'bob', name: 'Bob' }),
-      user({ id: 3, username: 'carol', name: 'Carol' }),
-    ];
-    h.api.listFriends.mockResolvedValue([
+    useStore.setState({
+      users: [
+        user({ id: 2, username: 'bob', name: 'Bob' }),
+        user({ id: 3, username: 'carol', name: 'Carol' }),
+      ],
+    });
+    // Call 1: initial render – both accepted.
+    h.api.listFriends.mockResolvedValueOnce([
       friend({ friend_id: 2, status: 'accepted' }),
       friend({ friend_id: 3, status: 'accepted' }),
     ]);
     h.api.removeFriend.mockResolvedValueOnce(undefined);
+    // Call 2: post-remove refresh – only Carol remains.
+    h.api.listFriends.mockResolvedValueOnce([friend({ friend_id: 3, status: 'accepted' })]);
     render(<FriendsDialog open onClose={() => {}} />);
     const removeBtn = await screen.findByRole('button', { name: /remove bob/i });
     await userEvent.click(removeBtn);
     expect(confirmSpy).toHaveBeenCalled();
     await waitFor(() => expect(h.api.removeFriend).toHaveBeenCalledWith(2));
-    expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Bob')).not.toBeInTheDocument());
     expect(screen.getByText('Carol')).toBeInTheDocument();
     confirmSpy.mockRestore();
   });
@@ -175,7 +191,7 @@ describe('FriendsDialog', () => {
     // /api/users hasn't loaded the friend yet, so userIndex.get returns
     // undefined and friendLabel hits the fallback branch.
     h.api.listFriends.mockResolvedValue([friend({ friend_id: 99, status: 'accepted' })]);
-    h.users = [];
+    useStore.setState({ users: [] });
     render(<FriendsDialog open onClose={() => {}} />);
     expect(await screen.findByText('User #99')).toBeInTheDocument();
   });
@@ -194,7 +210,9 @@ describe('FriendsDialog', () => {
   it('reports listFriends errors via setError', async () => {
     h.api.listFriends.mockRejectedValueOnce(new Error('boom-list'));
     render(<FriendsDialog open onClose={() => {}} />);
-    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('boom-list'));
+    // The real store's refreshFriendships catches the error and calls
+    // set({ error }) — verify via the store's getState().
+    await waitFor(() => expect(useStore.getState().error).toBe('boom-list'));
   });
 
   it('reports inviteFriend errors via setError', async () => {
@@ -205,18 +223,18 @@ describe('FriendsDialog', () => {
     await userEvent.type(screen.getByLabelText(/email address/i), 'bob@example.com');
     await userEvent.click(screen.getByRole('button', { name: /invite/i }));
     // A non-Error rejection should stringify, not crash.
-    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('plain-string-error'));
+    await waitFor(() => expect(useStore.getState().error).toBe('plain-string-error'));
   });
 
   it('reports acceptFriend errors via setError', async () => {
-    h.api.listFriends.mockResolvedValue([
+    h.api.listFriends.mockResolvedValueOnce([
       friend({ friend_id: 2, status: 'pending', direction: 'incoming' }),
     ]);
     h.api.acceptFriend.mockRejectedValueOnce(new Error('accept-failed'));
     render(<FriendsDialog open onClose={() => {}} />);
     const acceptBtn = await screen.findByRole('button', { name: /accept bob/i });
     await userEvent.click(acceptBtn);
-    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('accept-failed'));
+    await waitFor(() => expect(useStore.getState().error).toBe('accept-failed'));
   });
 
   it('does not call removeFriend when the user cancels the confirm prompt', async () => {
@@ -232,12 +250,12 @@ describe('FriendsDialog', () => {
 
   it('reports removeFriend errors via setError', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    h.api.listFriends.mockResolvedValue([friend({ friend_id: 2, status: 'accepted' })]);
+    h.api.listFriends.mockResolvedValueOnce([friend({ friend_id: 2, status: 'accepted' })]);
     h.api.removeFriend.mockRejectedValueOnce(new Error('rm-failed'));
     render(<FriendsDialog open onClose={() => {}} />);
     const removeBtn = await screen.findByRole('button', { name: /remove bob/i });
     await userEvent.click(removeBtn);
-    await waitFor(() => expect(h.setError).toHaveBeenCalledWith('rm-failed'));
+    await waitFor(() => expect(useStore.getState().error).toBe('rm-failed'));
     // Bob should still be in the list — the removal didn't actually happen.
     expect(screen.getByText('Bob')).toBeInTheDocument();
     confirmSpy.mockRestore();
@@ -316,10 +334,13 @@ describe('FriendsDialog', () => {
 
   it("renders the incoming-pending row's decline button", async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    h.api.listFriends.mockResolvedValue([
+    // Call 1: initial render – Bob pending-incoming.
+    h.api.listFriends.mockResolvedValueOnce([
       friend({ friend_id: 2, status: 'pending', direction: 'incoming' }),
     ]);
     h.api.removeFriend.mockResolvedValueOnce(undefined);
+    // Call 2: post-decline refresh – empty list.
+    h.api.listFriends.mockResolvedValueOnce([]);
     render(<FriendsDialog open onClose={() => {}} />);
     const declineBtn = await screen.findByRole('button', { name: /decline bob/i });
     await userEvent.click(declineBtn);
@@ -329,9 +350,11 @@ describe('FriendsDialog', () => {
 
   it('falls back to username when the user has no display name', async () => {
     h.api.listFriends.mockResolvedValue([friend({ friend_id: 5, status: 'accepted' })]);
-    h.users = [
-      user({ id: 5, username: 'eve', name: '   ' }), // whitespace-only name
-    ];
+    useStore.setState({
+      users: [
+        user({ id: 5, username: 'eve', name: '   ' }), // whitespace-only name
+      ],
+    });
     render(<FriendsDialog open onClose={() => {}} />);
     expect(await screen.findByText('eve')).toBeInTheDocument();
   });
