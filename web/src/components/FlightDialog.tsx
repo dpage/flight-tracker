@@ -568,10 +568,10 @@ interface VisibilityBlockProps {
   onPublicChange: (next: boolean) => void;
 }
 
-// VisibilityBlock renders the "Share with everyone" toggle + per-user share
-// list, used by both the minimal and full FlightDialog forms. When public,
-// the share list is dimmed and gets a helper note — it's still editable so
-// un-toggling later doesn't lose the curated list.
+// VisibilityBlock renders the "Share with all friends" toggle + per-user
+// share list, used by both the minimal and full FlightDialog forms. When
+// public, the share list is dimmed and gets a helper note — it's still
+// editable so un-toggling later doesn't lose the curated list.
 function VisibilityBlock({
   users,
   sharedWith,
@@ -589,7 +589,7 @@ function VisibilityBlock({
           disabled={disabled}
         />
       }
-      label="Share with everyone"
+      label="Share with all friends"
     />
   );
   return (
@@ -625,7 +625,7 @@ function VisibilityBlock({
             label="Shared with"
             helperText={
               isPublic
-                ? 'Flight is public — this list is ignored until you turn off "Share with everyone".'
+                ? 'Flight is shared with all your friends — this list is ignored until you turn off "Share with all friends".'
                 : 'Users listed here can see the flight in addition to its passengers.'
             }
           />

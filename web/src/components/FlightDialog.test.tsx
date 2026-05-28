@@ -174,12 +174,12 @@ describe('FlightDialog - full form (create)', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('sends share-with-everyone and explicit share-list IDs through createFlight', async () => {
+  it('sends share-with-all-friends and explicit share-list IDs through createFlight', async () => {
     h.state.users = [user({ id: 11, username: 'alice' }), user({ id: 22, username: 'bob' })];
     h.state.createFlight.mockResolvedValue(undefined);
     render(<FlightDialog open editId={null} onClose={vi.fn()} />);
     await userEvent.type(screen.getByLabelText(/^Flight number/), 'X1');
-    await userEvent.click(screen.getByLabelText('Share with everyone'));
+    await userEvent.click(screen.getByLabelText('Share with all friends'));
     // Pick "alice" from the Shared with autocomplete.
     await userEvent.click(screen.getByLabelText('Shared with'));
     await userEvent.click(await screen.findByText('alice'));
@@ -187,6 +187,19 @@ describe('FlightDialog - full form (create)', () => {
     const input = h.state.createFlight.mock.calls[0][0];
     expect(input.is_public).toBe(true);
     expect(input.shared_user_ids).toEqual([11]);
+  });
+
+  it('shows the all-friends helper text when the public toggle is on', async () => {
+    h.state.users = [user({ id: 11, username: 'alice' })];
+    h.state.createFlight.mockResolvedValue(undefined);
+    render(<FlightDialog open editId={null} onClose={vi.fn()} />);
+    await userEvent.type(screen.getByLabelText(/^Flight number/), 'X1');
+    await userEvent.click(screen.getByLabelText('Share with all friends'));
+    // Helper text on the Shared with autocomplete should switch to the
+    // all-friends note.
+    expect(
+      screen.getByText(/shared with all your friends/i),
+    ).toBeInTheDocument();
   });
 });
 
@@ -460,7 +473,7 @@ describe('FlightDialog - editing', () => {
     const f = flight({ id: 99, created_by: 99 });
     h.state.flights = [f];
     render(<FlightDialog open editId={99} onClose={vi.fn()} />);
-    expect(screen.getByLabelText('Share with everyone')).toBeDisabled();
+    expect(screen.getByLabelText('Share with all friends')).toBeDisabled();
     expect(screen.getByLabelText('Shared with')).toBeDisabled();
   });
 
@@ -470,7 +483,7 @@ describe('FlightDialog - editing', () => {
     const f = flight({ id: 99, created_by: 99 });
     h.state.flights = [f];
     render(<FlightDialog open editId={99} onClose={vi.fn()} />);
-    expect(screen.getByLabelText('Share with everyone')).not.toBeDisabled();
+    expect(screen.getByLabelText('Share with all friends')).not.toBeDisabled();
     expect(screen.getByLabelText('Shared with')).not.toBeDisabled();
   });
 
