@@ -50,7 +50,8 @@ func setup(t *testing.T, resolver providers.Resolver, cfg *config.Config) *testE
 	t.Helper()
 	pool := testsupport.NewPool(t)
 	s := store.New(pool)
-	a := auth.NewHandler("cid", "csec", sessKey, "http://localhost:8080", s)
+	a := auth.NewHandler(sessKey, "http://localhost:8080", s)
+	a.AddProvider(auth.NewGitHubProvider("cid", "csec"))
 	hub := sse.NewHub()
 	if cfg == nil {
 		cfg = &config.Config{}
@@ -82,10 +83,10 @@ func (e *testEnv) req(t *testing.T, method, path string, body any, asUser int64)
 	return w
 }
 
-func (e *testEnv) user(t *testing.T, login string, super bool) int64 {
+func (e *testEnv) user(t *testing.T, username string, super bool) int64 {
 	t.Helper()
 	u, err := e.store.InviteUser(context.Background(), store.InvitePayload{
-		GitHubLogin: login, Name: login, IsSuperuser: super,
+		Username: username, Name: username, IsSuperuser: super,
 	})
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
@@ -119,7 +120,7 @@ func TestGetMeAndConfig(t *testing.T) {
 		t.Fatalf("/api/me = %d", w.Code)
 	}
 	me := decodeBody[map[string]any](t, w)
-	if me["github_login"] != "me" {
+	if me["username"] != "me" {
 		t.Errorf("unexpected me: %v", me)
 	}
 
@@ -364,7 +365,7 @@ func TestUserAdminEndpoints(t *testing.T) {
 	plain := e.user(t, "plain", false)
 
 	// Non-superuser is forbidden from user mutations.
-	if w := e.req(t, "POST", "/api/users", map[string]any{"github_login": "x"}, plain); w.Code != http.StatusForbidden {
+	if w := e.req(t, "POST", "/api/users", map[string]any{"username": "x"}, plain); w.Code != http.StatusForbidden {
 		t.Errorf("non-super invite = %d, want 403", w.Code)
 	}
 
@@ -378,14 +379,19 @@ func TestUserAdminEndpoints(t *testing.T) {
 	if w := e.req(t, "POST", "/api/users", "??", super); w.Code != 400 {
 		t.Errorf("invite bad body = %d", w.Code)
 	}
-	if w := e.req(t, "POST", "/api/users", map[string]any{"github_login": "  "}, super); w.Code != 400 {
+	if w := e.req(t, "POST", "/api/users", map[string]any{"username": "  "}, super); w.Code != 400 {
 		t.Errorf("invite empty login = %d", w.Code)
 	}
-	w = e.req(t, "POST", "/api/users", map[string]any{"github_login": "newbie", "name": "N"}, super)
+	w = e.req(t, "POST", "/api/users", map[string]any{"username": "newbie", "name": "N"}, super)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("invite = %d %s", w.Code, w.Body.String())
 	}
 	newbie := int64(decodeBody[map[string]any](t, w)["id"].(float64))
+
+	// Duplicate username should surface as 409, not the raw pg error.
+	if w := e.req(t, "POST", "/api/users", map[string]any{"username": "newbie"}, super); w.Code != http.StatusConflict {
+		t.Errorf("duplicate invite = %d, want 409 (body=%s)", w.Code, w.Body.String())
+	}
 
 	// update: bad id, bad body, not found, self-guards, success.
 	if w := e.req(t, "PATCH", "/api/users/x", map[string]any{}, super); w.Code != 400 {

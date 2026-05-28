@@ -56,8 +56,7 @@ func (s *Store) UpsertVerifiedEmail(ctx context.Context, userID int64, address s
 // verified email address. Returns ErrNotFound if no verified row matches.
 func (s *Store) UserByVerifiedEmail(ctx context.Context, address string) (*User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `
-		SELECT u.id, u.github_id, u.github_login, u.name, u.avatar_url,
-			u.is_superuser, u.is_active, u.last_login_at, u.created_at, u.updated_at
+		SELECT `+prefixed(userColumns, "u.")+`
 		FROM users u
 		JOIN user_emails e ON e.user_id = u.id
 		WHERE lower(e.address) = lower($1) AND e.verified = TRUE

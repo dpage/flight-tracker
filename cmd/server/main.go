@@ -68,7 +68,17 @@ func run() error {
 	}
 
 	s := store.New(pool)
-	authH := auth.NewHandler(cfg.GitHubID, cfg.GitHubSecret, cfg.SessionKey, cfg.PublicURL, s)
+	authH := auth.NewHandler(cfg.SessionKey, cfg.PublicURL, s)
+	authH.MailFromAddress = cfg.MailFromAddress
+	authH.SendmailPath = cfg.SendmailPath
+	if cfg.GitHubID != "" {
+		authH.AddProvider(auth.NewGitHubProvider(cfg.GitHubID, cfg.GitHubSecret))
+		slog.Info("auth provider: github")
+	}
+	if cfg.GoogleID != "" {
+		authH.AddProvider(auth.NewGoogleProvider(cfg.GoogleID, cfg.GoogleSecret))
+		slog.Info("auth provider: google")
+	}
 	hub := sse.NewHub()
 
 	// Two resolver handles share one upstream AeroDataBox client. The

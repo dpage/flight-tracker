@@ -75,15 +75,20 @@ func wireHTTP(t *testing.T, h *Handler, srv *httptest.Server) {
 	h.HTTP = &http.Client{Transport: rewriteTransport{base: u}, Timeout: 5 * time.Second}
 }
 
+// githubProvider returns the provider every test in this file uses.
+func githubProvider() *Provider {
+	return NewGitHubProvider("cid", "csecret")
+}
+
 func TestNewHandlerSecureFromHTTPS(t *testing.T) {
-	h := NewHandler("id", "sec", key, "https://x.example.com/", nil)
+	h := NewHandler(key, "https://x.example.com/", nil)
 	if !h.Secure {
 		t.Error("https public URL should set Secure")
 	}
 	if h.PublicURL != "https://x.example.com" {
 		t.Errorf("trailing slash not trimmed: %q", h.PublicURL)
 	}
-	h2 := NewHandler("id", "sec", key, "http://localhost", nil)
+	h2 := NewHandler(key, "http://localhost", nil)
 	if h2.Secure {
 		t.Error("http public URL should not set Secure")
 	}
@@ -103,8 +108,9 @@ func TestRegisterRoutes(t *testing.T) {
 
 func TestLoginSetsStateCookieAndRedirects(t *testing.T) {
 	h, _ := newTestHandler(t)
+	p := h.providers["github"]
 	w := httptest.NewRecorder()
-	h.Login(w, httptest.NewRequest("GET", "/auth/github/login", nil))
+	h.login(w, httptest.NewRequest("GET", "/auth/github/login", nil), p)
 	res := w.Result()
 	if res.StatusCode != http.StatusFound {
 		t.Fatalf("code = %d", res.StatusCode)
@@ -129,22 +135,22 @@ func TestLoginSetsStateCookieAndRedirects(t *testing.T) {
 	}
 }
 
-func TestFetchPrimaryEmailSuccess(t *testing.T) {
+func TestFetchGitHubPrimaryEmailSuccess(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
-	got, err := h.fetchPrimaryEmail(context.Background(), "tok")
+	got, err := fetchGitHubPrimaryEmail(context.Background(), h.HTTP, "tok")
 	if err != nil {
-		t.Fatalf("fetchPrimaryEmail: %v", err)
+		t.Fatalf("fetchGitHubPrimaryEmail: %v", err)
 	}
 	if got != "octo@example.com" {
 		t.Errorf("got %q, want octo@example.com", got)
 	}
 }
 
-func TestFetchPrimaryEmail_NoPrimary(t *testing.T) {
+func TestFetchGitHubPrimaryEmail_NoPrimary(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsBody: `[{"email":"x@x","primary":false,"verified":true}]`}))
-	got, err := h.fetchPrimaryEmail(context.Background(), "tok")
+	got, err := fetchGitHubPrimaryEmail(context.Background(), h.HTTP, "tok")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -153,35 +159,36 @@ func TestFetchPrimaryEmail_NoPrimary(t *testing.T) {
 	}
 }
 
-func TestFetchPrimaryEmail_HTTPError(t *testing.T) {
+func TestFetchGitHubPrimaryEmail_HTTPError(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsStatus: 401, emailsBody: "nope"}))
-	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+	if _, err := fetchGitHubPrimaryEmail(context.Background(), h.HTTP, "tok"); err == nil {
 		t.Error("expected error for 401")
 	}
 }
 
-func TestFetchPrimaryEmail_BadJSON(t *testing.T) {
+func TestFetchGitHubPrimaryEmail_BadJSON(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsBody: "not json"}))
-	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+	if _, err := fetchGitHubPrimaryEmail(context.Background(), h.HTTP, "tok"); err == nil {
 		t.Error("expected JSON decode error")
 	}
 }
 
-func TestFetchPrimaryEmail_TransportError(t *testing.T) {
+func TestFetchGitHubPrimaryEmail_TransportError(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.HTTP = &http.Client{Transport: errTransport{}}
-	if _, err := h.fetchPrimaryEmail(context.Background(), "tok"); err == nil {
+	if _, err := fetchGitHubPrimaryEmail(context.Background(), h.HTTP, "tok"); err == nil {
 		t.Error("expected transport error")
 	}
 }
 
+// fetchProfile swallows email failures and still returns a profile.
 func TestCallbackToleratesEmailFetchFailure(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{emailsStatus: 500}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	res := w.Result()
 	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/" {
 		t.Fatalf("expected redirect to /, got %d", res.StatusCode)
@@ -199,19 +206,19 @@ func stateCookie(h *Handler, expired bool) (*http.Cookie, string) {
 	return &http.Cookie{Name: StateCookie, Value: val}, state
 }
 
-func callback(h *Handler, q url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
-	r := httptest.NewRequest("GET", "/auth/github/callback?"+q.Encode(), nil)
+func callback(h *Handler, providerName string, q url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
+	r := httptest.NewRequest("GET", "/auth/"+providerName+"/callback?"+q.Encode(), nil)
 	if cookie != nil {
 		r.AddCookie(cookie)
 	}
 	w := httptest.NewRecorder()
-	h.Callback(w, r)
+	h.callback(w, r, h.providers[providerName])
 	return w
 }
 
 func TestCallbackErrorParam(t *testing.T) {
 	h, _ := newTestHandler(t)
-	w := callback(h, url.Values{"error": {"access_denied"}}, nil)
+	w := callback(h, "github", url.Values{"error": {"access_denied"}}, nil)
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "access_denied") {
 		t.Errorf("expected escaped error page, code=%d body=%s", w.Code, w.Body.String())
 	}
@@ -219,7 +226,7 @@ func TestCallbackErrorParam(t *testing.T) {
 
 func TestCallbackMissingCodeOrState(t *testing.T) {
 	h, _ := newTestHandler(t)
-	w := callback(h, url.Values{"code": {""}, "state": {""}}, nil)
+	w := callback(h, "github", url.Values{"code": {""}, "state": {""}}, nil)
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "missing code or state") {
 		t.Errorf("unexpected: %d %s", w.Code, w.Body.String())
 	}
@@ -227,7 +234,7 @@ func TestCallbackMissingCodeOrState(t *testing.T) {
 
 func TestCallbackMissingStateCookie(t *testing.T) {
 	h, _ := newTestHandler(t)
-	w := callback(h, url.Values{"code": {"c"}, "state": {"s"}}, nil)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {"s"}}, nil)
 	if !strings.Contains(w.Body.String(), "state cookie missing") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -236,7 +243,7 @@ func TestCallbackMissingStateCookie(t *testing.T) {
 func TestCallbackStateMismatch(t *testing.T) {
 	h, _ := newTestHandler(t)
 	c, _ := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {"WRONG"}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {"WRONG"}}, c)
 	if !strings.Contains(w.Body.String(), "state mismatch") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -245,7 +252,7 @@ func TestCallbackStateMismatch(t *testing.T) {
 func TestCallbackStateExpired(t *testing.T) {
 	h, _ := newTestHandler(t)
 	c, state := stateCookie(h, true)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "state expired") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -255,7 +262,7 @@ func TestCallbackTokenExchangeFails(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{tokenStatus: 500, tokenBody: "boom"}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "could not complete sign-in") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -265,7 +272,7 @@ func TestCallbackTokenErrorJSON(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{tokenBody: `{"error":"bad_verification_code","error_description":"nope"}`}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "could not complete sign-in") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -275,7 +282,7 @@ func TestCallbackEmptyAccessToken(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{tokenBody: `{"access_token":""}`}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "could not complete sign-in") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -285,7 +292,7 @@ func TestCallbackProfileFetchFails(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{userStatus: 401, userBody: "nope"}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "could not fetch GitHub profile") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -296,10 +303,10 @@ func TestCallbackNotOnAllowlist(t *testing.T) {
 	// Pre-seed another user so CountUsers > 0 (no bootstrap), and the
 	// octocat login is not invited → ErrNotFound → allowlist message.
 	_, _ = pool.Exec(context.Background(),
-		`INSERT INTO users (github_login, is_active) VALUES ('someoneelse', true)`)
+		`INSERT INTO users (username, is_active) VALUES ('someoneelse', true)`)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "not on the allowlist") {
 		t.Errorf("unexpected: %s", w.Body.String())
 	}
@@ -309,7 +316,7 @@ func TestCallbackSuccessBootstrapsFirstUser(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	res := w.Result()
 	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/" {
 		t.Fatalf("expected redirect to /, got %d %s", res.StatusCode, res.Header.Get("Location"))
@@ -327,16 +334,16 @@ func TestCallbackSuccessBootstrapsFirstUser(t *testing.T) {
 
 func TestCallbackSuccessExistingInvitedUser(t *testing.T) {
 	h, pool := newTestHandler(t)
-	// Pre-create an invited (github_id NULL) active user matching the
+	// Pre-create an invited (no identity) active user matching the
 	// octocat login the test GitHub server returns; plus another user so
 	// this isn't the bootstrap path.
 	_, _ = pool.Exec(context.Background(),
-		`INSERT INTO users (github_login, is_active) VALUES ('someoneelse', true)`)
+		`INSERT INTO users (username, is_active) VALUES ('someoneelse', true)`)
 	_, _ = pool.Exec(context.Background(),
-		`INSERT INTO users (github_login, is_active) VALUES ('octocat', true)`)
+		`INSERT INTO users (username, is_active) VALUES ('octocat', true)`)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
 	c, state := stateCookie(h, false)
-	w := callback(h, url.Values{"code": {"c"}, "state": {state}}, c)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	res := w.Result()
 	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/" {
 		t.Fatalf("expected redirect to /, got %d", res.StatusCode)
@@ -352,7 +359,7 @@ func (errTransport) RoundTrip(*http.Request) (*http.Response, error) {
 func TestExchangeCodeTransportError(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.HTTP = &http.Client{Transport: errTransport{}}
-	if _, err := h.exchangeCode(context.Background(), "code"); err == nil {
+	if _, err := h.exchangeCode(context.Background(), githubProvider(), "code"); err == nil {
 		t.Error("expected transport error")
 	}
 }
@@ -360,7 +367,7 @@ func TestExchangeCodeTransportError(t *testing.T) {
 func TestFetchProfileTransportError(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.HTTP = &http.Client{Transport: errTransport{}}
-	if _, err := h.fetchProfile(context.Background(), "tok"); err == nil {
+	if _, err := fetchGitHubProfile(context.Background(), h.HTTP, "tok"); err == nil {
 		t.Error("expected transport error")
 	}
 }
@@ -380,7 +387,7 @@ func TestLogout(t *testing.T) {
 func TestExchangeCodeBadJSON(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{tokenBody: "not json"}))
-	if _, err := h.exchangeCode(context.Background(), "code"); err == nil {
+	if _, err := h.exchangeCode(context.Background(), githubProvider(), "code"); err == nil {
 		t.Error("expected JSON decode error")
 	}
 }
@@ -388,7 +395,7 @@ func TestExchangeCodeBadJSON(t *testing.T) {
 func TestFetchProfileBadJSON(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{userBody: "not json"}))
-	if _, err := h.fetchProfile(context.Background(), "tok"); err == nil {
+	if _, err := fetchGitHubProfile(context.Background(), h.HTTP, "tok"); err == nil {
 		t.Error("expected JSON decode error")
 	}
 }
@@ -396,11 +403,11 @@ func TestFetchProfileBadJSON(t *testing.T) {
 func TestFetchProfileSuccess(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
-	p, err := h.fetchProfile(context.Background(), "tok")
+	p, err := fetchGitHubProfile(context.Background(), h.HTTP, "tok")
 	if err != nil {
-		t.Fatalf("fetchProfile: %v", err)
+		t.Fatalf("fetchGitHubProfile: %v", err)
 	}
-	if p.ID != 555 || p.Login != "octocat" {
+	if p.ProviderUserID != "555" || p.Username != "octocat" || p.Provider != "github" {
 		t.Errorf("unexpected profile: %+v", p)
 	}
 }
@@ -423,7 +430,7 @@ func TestRandomTokenUnique(t *testing.T) {
 func TestExchangeCodeReturnsToken(t *testing.T) {
 	h, _ := newTestHandler(t)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
-	tok, err := h.exchangeCode(context.Background(), "code")
+	tok, err := h.exchangeCode(context.Background(), githubProvider(), "code")
 	if err != nil || tok != "tok123" {
 		t.Fatalf("tok=%q err=%v", tok, err)
 	}
@@ -432,4 +439,27 @@ func TestExchangeCodeReturnsToken(t *testing.T) {
 		AccessToken string `json:"access_token"`
 	}
 	_ = json.Unmarshal([]byte(`{"access_token":"x"}`), &probe)
+}
+
+func TestListProvidersEndpoint(t *testing.T) {
+	h, _ := newTestHandler(t)
+	mux := http.NewServeMux()
+	h.Register(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/auth/providers", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", w.Code)
+	}
+	var body struct {
+		Providers []struct {
+			Name  string `json:"name"`
+			Label string `json:"label"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Providers) != 1 || body.Providers[0].Name != "github" {
+		t.Errorf("unexpected providers: %+v", body.Providers)
+	}
 }

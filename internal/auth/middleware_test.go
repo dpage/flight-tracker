@@ -17,7 +17,8 @@ func newTestHandler(t *testing.T) (*Handler, *pgxpool.Pool) {
 	t.Helper()
 	pool := testsupport.NewPool(t)
 	s := store.New(pool)
-	h := NewHandler("cid", "csecret", key, "http://localhost:8080", s)
+	h := NewHandler(key, "http://localhost:8080", s)
+	h.AddProvider(NewGitHubProvider("cid", "csecret"))
 	return h, pool
 }
 

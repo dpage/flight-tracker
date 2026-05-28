@@ -1,12 +1,19 @@
 export interface User {
   id: number;
-  github_login: string;
+  username: string;
   name: string;
   avatar_url: string;
   is_superuser: boolean;
   is_active: boolean;
   has_logged_in: boolean;
   last_login_at?: string;
+}
+
+export interface AuthProvider {
+  /** URL-safe identifier, used in /auth/{name}/login. */
+  name: string;
+  /** Human-readable name shown on the sign-in button. */
+  label: string;
 }
 
 export interface Position {
@@ -136,7 +143,7 @@ export interface UpdateFlightInput {
 }
 
 export interface InviteUserInput {
-  github_login: string;
+  username: string;
   name?: string;
   is_superuser?: boolean;
 }

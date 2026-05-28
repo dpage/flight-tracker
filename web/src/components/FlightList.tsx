@@ -253,16 +253,16 @@ function FlightRow({
               </Tooltip>
             )}
             {owner && (
-              <Tooltip title={`Added by ${owner.github_login}`}>
+              <Tooltip title={`Added by ${owner.username}`}>
                 <Stack direction="row" alignItems="center" spacing={0.5} sx={{ ml: 'auto' }}>
                   <Avatar
                     src={owner.avatar_url}
                     sx={{ width: 18, height: 18, fontSize: 10 }}
                   >
-                    {owner.github_login.charAt(0).toUpperCase()}
+                    {owner.username.charAt(0).toUpperCase()}
                   </Avatar>
                   <Typography variant="caption" color="text.secondary" noWrap>
-                    {owner.github_login}
+                    {owner.username}
                   </Typography>
                 </Stack>
               </Tooltip>
@@ -294,8 +294,8 @@ function FlightRow({
               sx={{ mt: 0.5, justifyContent: 'flex-start', '& .MuiAvatar-root': { width: 24, height: 24, fontSize: 12 } }}
             >
               {passengers.map((u) => (
-                <Tooltip key={u.id} title={u.github_login}>
-                  <Avatar src={u.avatar_url}>{u.github_login.charAt(0).toUpperCase()}</Avatar>
+                <Tooltip key={u.id} title={u.username}>
+                  <Avatar src={u.avatar_url}>{u.username.charAt(0).toUpperCase()}</Avatar>
                 </Tooltip>
               ))}
             </AvatarGroup>

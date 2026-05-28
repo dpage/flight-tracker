@@ -90,7 +90,7 @@ export default function AppShell() {
               aria-label="Account menu"
             >
               <Avatar src={me?.avatar_url} sx={{ width: 28, height: 28 }}>
-                {me?.github_login.charAt(0).toUpperCase()}
+                {me?.username.charAt(0).toUpperCase()}
               </Avatar>
             </IconButton>
           </Tooltip>
@@ -104,7 +104,7 @@ export default function AppShell() {
             {me && (
               <MenuItem disabled sx={{ opacity: '1 !important' }}>
                 <Typography variant="caption" color="text.secondary">
-                  Signed in as {me.github_login}
+                  Signed in as {me.username}
                 </Typography>
               </MenuItem>
             )}

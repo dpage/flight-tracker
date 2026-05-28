@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({
     listFlights: vi.fn(),
   },
   setError: vi.fn(),
-  me: { id: 1, github_login: 'alice', is_superuser: false } as { id: number; github_login: string; is_superuser: boolean },
+  me: { id: 1, username: 'alice', is_superuser: false } as { id: number; username: string; is_superuser: boolean },
 }));
 
 vi.mock('../api/client', () => ({ api: h.api }));

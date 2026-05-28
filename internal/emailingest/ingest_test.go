@@ -160,7 +160,7 @@ func TestIngest_EndToEnd_Success(t *testing.T) {
 		`{"flights":[{"ident":"TK1980","date":"`+time.Now().AddDate(0, 1, 0).Format("2006-01-02")+`","confidence":"high"}]}`,
 		nil, true)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestIngest_EndToEnd_Success(t *testing.T) {
 func TestIngest_DKIMFailed_Poison(t *testing.T) {
 	h := newHarness(t, `{"flights":[]}`, nil, true)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestIngest_DKIMOff_AcceptsAnyway(t *testing.T) {
 		`{"flights":[{"ident":"TK1980","date":"`+time.Now().AddDate(0, 1, 0).Format("2006-01-02")+`","confidence":"high"}]}`,
 		nil, false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestIngest_ResolverError_PartialAllFailed(t *testing.T) {
 		`{"flights":[{"ident":"TK1980","date":"`+time.Now().AddDate(0, 1, 0).Format("2006-01-02")+`","confidence":"high"}]}`,
 		errors.New("upstream down"), false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestIngest_ResolverUnscheduled_ManualFallback(t *testing.T) {
 	}]}`
 	h := newHarness(t, llmResp, providers.ErrFlightUnscheduled, false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestIngest_ResolverUnscheduled_NoManualDetails_Failure(t *testing.T) {
 	llmResp := `{"flights":[{"ident":"TK1980","date":"` + depDate + `","confidence":"high"}]}`
 	h := newHarness(t, llmResp, providers.ErrFlightUnscheduled, false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestIngest_PublishesSSEOnInsert(t *testing.T) {
 		`{"flights":[{"ident":"TK1980","date":"`+depDate+`","confidence":"high"}]}`,
 		nil, false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestIngest_ManualFallback_PublishesSSE(t *testing.T) {
 	}]}`
 	h := newHarness(t, llmResp, providers.ErrFlightUnscheduled, false)
 	ctx := context.Background()
-	u, _ := h.store.InviteUser(ctx, store.InvitePayload{GitHubLogin: "alice"})
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
 	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
 		t.Fatal(err)
 	}

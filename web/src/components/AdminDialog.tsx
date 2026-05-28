@@ -45,17 +45,17 @@ export default function AdminDialog({ open, onClose }: Props) {
   const theme = useTheme();
   const isNarrow = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [login, setLogin] = useState('');
+  const [username, setUsername] = useState('');
   const [name, setName] = useState('');
   const [makeAdmin, setMakeAdmin] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const doInvite = async () => {
-    if (!login.trim()) return;
+    if (!username.trim()) return;
     setBusy(true);
     try {
-      await inviteUser({ github_login: login.trim(), name: name.trim(), is_superuser: makeAdmin });
-      setLogin('');
+      await inviteUser({ username: username.trim(), name: name.trim(), is_superuser: makeAdmin });
+      setUsername('');
       setName('');
       setMakeAdmin(false);
     } catch (err) {
@@ -74,7 +74,7 @@ export default function AdminDialog({ open, onClose }: Props) {
       setError(err instanceof Error ? err.message : String(err)),
     );
   const onDelete = (u: User) => {
-    if (confirm(`Delete ${u.github_login}?`)) void deleteUser(u.id);
+    if (confirm(`Delete ${u.username}?`)) void deleteUser(u.id);
   };
 
   return (
@@ -89,9 +89,9 @@ export default function AdminDialog({ open, onClose }: Props) {
             flexWrap="wrap"
           >
             <TextField
-              label="GitHub login"
-              value={login}
-              onChange={(e) => setLogin(e.target.value)}
+              label="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               size="small"
               fullWidth={isNarrow}
             />
@@ -116,7 +116,7 @@ export default function AdminDialog({ open, onClose }: Props) {
               />
               <Button
                 variant="contained"
-                disabled={busy || !login.trim()}
+                disabled={busy || !username.trim()}
                 onClick={() => void doInvite()}
               >
                 Invite
@@ -156,11 +156,11 @@ export default function AdminDialog({ open, onClose }: Props) {
                       <TableCell>
                         <Stack direction="row" spacing={1} alignItems="center">
                           <Avatar src={u.avatar_url} sx={{ width: 28, height: 28 }}>
-                            {u.github_login.charAt(0).toUpperCase()}
+                            {u.username.charAt(0).toUpperCase()}
                           </Avatar>
                           <Stack>
                             <Typography variant="body2">
-                              {u.github_login}
+                              {u.username}
                               {isMe && (
                                 <Chip label="you" size="small" sx={{ ml: 1 }} variant="outlined" />
                               )}
@@ -236,12 +236,12 @@ function UserCard({ user, isMe, onToggleSuperuser, onToggleActive, onDelete }: U
     <Box sx={{ py: 1.25 }}>
       <Stack direction="row" spacing={1.5} alignItems="flex-start">
         <Avatar src={user.avatar_url} sx={{ width: 36, height: 36, mt: 0.25 }}>
-          {user.github_login.charAt(0).toUpperCase()}
+          {user.username.charAt(0).toUpperCase()}
         </Avatar>
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap">
             <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-              {user.github_login}
+              {user.username}
             </Typography>
             {isMe && <Chip label="you" size="small" variant="outlined" />}
             {!user.has_logged_in && (

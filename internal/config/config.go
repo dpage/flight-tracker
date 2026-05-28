@@ -14,6 +14,8 @@ type Config struct {
 	DatabaseURL     string
 	GitHubID        string
 	GitHubSecret    string
+	GoogleID        string
+	GoogleSecret    string
 	SessionKey      []byte
 	OpenSkyUsername string
 	OpenSkyPassword string
@@ -21,6 +23,18 @@ type Config struct {
 	AeroDataBoxKey  string
 	PollInterval    time.Duration
 	DevAuthBypass   bool
+
+	// Outbound mail (optional). Used for side-channel notifications such
+	// as "a new sign-in method was linked to your account". When
+	// MailFromAddress is empty the notifications are skipped and a
+	// warning is logged — the rest of the app keeps working.
+	//
+	// MailFromAddress doubles as the SMTP envelope sender, so its domain
+	// should match the address used in the From: header so DMARC/SPF can
+	// align. SendmailPath defaults to the distro-standard
+	// /usr/sbin/sendmail when MAIL_SENDMAIL_PATH is empty.
+	MailFromAddress string
+	SendmailPath    string
 
 	// Email ingest (optional). All EmailIngest* fields are zero when
 	// EmailIngestEnabled is false. When enabled, the rest are populated
@@ -52,12 +66,16 @@ func Load() (*Config, error) {
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		GitHubID:        os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubSecret:    os.Getenv("GITHUB_CLIENT_SECRET"),
+		GoogleID:        os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleSecret:    os.Getenv("GOOGLE_CLIENT_SECRET"),
 		OpenSkyUsername: os.Getenv("OPENSKY_USERNAME"),
 		OpenSkyPassword: os.Getenv("OPENSKY_PASSWORD"),
 		OpenSkyEnabled:  os.Getenv("OPENSKY_ENABLED") == "1",
 		AeroDataBoxKey:  os.Getenv("AERODATABOX_RAPIDAPI_KEY"),
 		PollInterval:    pollInterval,
 		DevAuthBypass:   os.Getenv("DEV_AUTH_BYPASS") == "1",
+		MailFromAddress: os.Getenv("MAIL_FROM_ADDRESS"),
+		SendmailPath:    getenv("MAIL_SENDMAIL_PATH", "/usr/sbin/sendmail"),
 	}
 
 	sessKey := os.Getenv("SESSION_KEY")
@@ -66,20 +84,28 @@ func Load() (*Config, error) {
 	}
 	cfg.SessionKey = []byte(sessKey)
 
-	var missing []string
+	// Collect every configuration problem we can detect so the operator
+	// sees them all in one go rather than fixing them one restart at a time.
+	var problems []string
 	if cfg.DatabaseURL == "" {
-		missing = append(missing, "DATABASE_URL")
+		problems = append(problems, "DATABASE_URL must be set")
 	}
-	if !cfg.DevAuthBypass {
-		if cfg.GitHubID == "" {
-			missing = append(missing, "GITHUB_CLIENT_ID")
-		}
-		if cfg.GitHubSecret == "" {
-			missing = append(missing, "GITHUB_CLIENT_SECRET")
-		}
+	// OAuth: each provider is optional, but at least one must be fully
+	// configured (or DEV_AUTH_BYPASS must be on). A half-configured
+	// provider — ID without secret or vice versa — is an error since the
+	// flow would 500 on first sign-in.
+	if (cfg.GitHubID == "") != (cfg.GitHubSecret == "") {
+		problems = append(problems, "GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET must be set together")
 	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("missing required env: %s", strings.Join(missing, ", "))
+	if (cfg.GoogleID == "") != (cfg.GoogleSecret == "") {
+		problems = append(problems, "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together")
+	}
+	if !cfg.DevAuthBypass && cfg.GitHubID == "" && cfg.GoogleID == "" {
+		problems = append(problems, "at least one OAuth provider must be configured "+
+			"(set GITHUB_CLIENT_ID+SECRET and/or GOOGLE_CLIENT_ID+SECRET)")
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("invalid configuration:\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	if cfg.DevAuthBypass && !strings.HasPrefix(cfg.PublicURL, "http://localhost") &&
 		!strings.HasPrefix(cfg.PublicURL, "http://127.0.0.1") {

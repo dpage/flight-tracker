@@ -200,7 +200,7 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
   });
 
   it('inviteUser', async () => {
-    await api.inviteUser({ github_login: 'oct' });
+    await api.inviteUser({ username: 'oct' });
     expect(last()[0]).toBe('/api/users');
     expect(last()[1]?.method).toBe('POST');
   });
@@ -248,6 +248,65 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
     expect(r).toBeUndefined();
     expect(s.mock.calls[0][0]).toBe('/auth/logout');
     expect(s.mock.calls[0][1]?.method).toBe('POST');
+  });
+});
+
+describe('api.getAuthProviders', () => {
+  it('returns the providers array on 200', async () => {
+    const spy = mockFetch(() =>
+      jsonResponse({
+        providers: [
+          { name: 'github', label: 'GitHub' },
+          { name: 'google', label: 'Google' },
+        ],
+      }),
+    );
+    await expect(api.getAuthProviders()).resolves.toEqual([
+      { name: 'github', label: 'GitHub' },
+      { name: 'google', label: 'Google' },
+    ]);
+    expect(spy.mock.calls[0][0]).toBe('/auth/providers');
+  });
+
+  it('returns an empty list on non-ok responses', async () => {
+    mockFetch(() => jsonResponse({}, 500));
+    await expect(api.getAuthProviders()).resolves.toEqual([]);
+  });
+
+  it('returns an empty list when the body lacks providers', async () => {
+    mockFetch(() => jsonResponse({}));
+    await expect(api.getAuthProviders()).resolves.toEqual([]);
+  });
+
+  it('returns an empty list when fetch rejects (network down)', async () => {
+    mockFetch(() => Promise.reject(new Error('boom')));
+    await expect(api.getAuthProviders()).resolves.toEqual([]);
+  });
+
+  it('returns an empty list when providers is not an array', async () => {
+    mockFetch(() => jsonResponse({ providers: 'oops' }));
+    await expect(api.getAuthProviders()).resolves.toEqual([]);
+  });
+
+  it('drops entries that do not match the AuthProvider shape', async () => {
+    mockFetch(() =>
+      jsonResponse({
+        providers: [
+          { name: 'github', label: 'GitHub' },
+          // missing label
+          { name: 'no-label' },
+          // wrong types
+          { name: 42, label: 'Bad' },
+          null,
+          'not-an-object',
+          { name: 'google', label: 'Google' },
+        ],
+      }),
+    );
+    await expect(api.getAuthProviders()).resolves.toEqual([
+      { name: 'github', label: 'GitHub' },
+      { name: 'google', label: 'Google' },
+    ]);
   });
 });
 

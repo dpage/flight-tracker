@@ -25,7 +25,7 @@ import AdminDialog from './AdminDialog';
 function user(over: Partial<User> = {}): User {
   return {
     id: 1,
-    github_login: 'octocat',
+    username: 'octocat',
     name: 'Octo',
     avatar_url: '',
     is_superuser: false,
@@ -51,8 +51,8 @@ describe('AdminDialog wide (table) layout', () => {
   it('renders the table with you/invited chips, name, and last sign-in', () => {
     h.state.me = user({ id: 1 });
     h.state.users = [
-      user({ id: 1, github_login: 'me', name: 'My Name', last_login_at: '2024-01-01T10:00:00Z' }),
-      user({ id: 2, github_login: 'newbie', name: '', has_logged_in: false }),
+      user({ id: 1, username: 'me', name: 'My Name', last_login_at: '2024-01-01T10:00:00Z' }),
+      user({ id: 2, username: 'newbie', name: '', has_logged_in: false }),
     ];
     render(<AdminDialog open onClose={vi.fn()} />);
     expect(screen.getByText('you')).toBeInTheDocument();
@@ -65,14 +65,14 @@ describe('AdminDialog wide (table) layout', () => {
   it('invite success clears the fields', async () => {
     h.state.inviteUser.mockResolvedValue(undefined);
     render(<AdminDialog open onClose={vi.fn()} />);
-    const login = screen.getByLabelText(/github login/i);
+    const login = screen.getByLabelText(/^username$/i);
     const name = screen.getByLabelText(/display name/i);
     await userEvent.type(login, 'octo');
     await userEvent.type(name, 'Octo Cat');
     await userEvent.click(screen.getByLabelText('Superuser'));
     await userEvent.click(screen.getByRole('button', { name: /invite/i }));
     expect(h.state.inviteUser).toHaveBeenCalledWith({
-      github_login: 'octo',
+      username: 'octo',
       name: 'Octo Cat',
       is_superuser: true,
     });
@@ -88,7 +88,7 @@ describe('AdminDialog wide (table) layout', () => {
   it('invite error surfaces via setError', async () => {
     h.state.inviteUser.mockRejectedValue(new Error('dup user'));
     render(<AdminDialog open onClose={vi.fn()} />);
-    await userEvent.type(screen.getByLabelText(/github login/i), 'octo');
+    await userEvent.type(screen.getByLabelText(/^username$/i), 'octo');
     await userEvent.click(screen.getByRole('button', { name: /invite/i }));
     expect(h.state.setError).toHaveBeenCalledWith('dup user');
   });
@@ -96,14 +96,14 @@ describe('AdminDialog wide (table) layout', () => {
   it('invite error with non-Error uses String()', async () => {
     h.state.inviteUser.mockRejectedValue('weird');
     render(<AdminDialog open onClose={vi.fn()} />);
-    await userEvent.type(screen.getByLabelText(/github login/i), 'octo');
+    await userEvent.type(screen.getByLabelText(/^username$/i), 'octo');
     await userEvent.click(screen.getByRole('button', { name: /invite/i }));
     expect(h.state.setError).toHaveBeenCalledWith('weird');
   });
 
   it('toggles superuser/active successfully', async () => {
     h.state.me = user({ id: 99 });
-    h.state.users = [user({ id: 2, github_login: 'bob', is_superuser: false, is_active: true })];
+    h.state.users = [user({ id: 2, username: 'bob', is_superuser: false, is_active: true })];
     h.state.updateUser.mockResolvedValue(undefined);
     render(<AdminDialog open onClose={vi.fn()} />);
     const bobRow = screen.getAllByRole('row').find((r) => within(r).queryByText('bob'))!;
@@ -116,7 +116,7 @@ describe('AdminDialog wide (table) layout', () => {
 
   it('toggle superuser error is caught into setError', async () => {
     h.state.me = user({ id: 99 });
-    h.state.users = [user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 2, username: 'bob' })];
     h.state.updateUser.mockRejectedValueOnce(new Error('nope'));
     render(<AdminDialog open onClose={vi.fn()} />);
     const bobRow = screen.getAllByRole('row').find((r) => within(r).queryByText('bob'))!;
@@ -128,7 +128,7 @@ describe('AdminDialog wide (table) layout', () => {
 
   it('toggle active error (non-Error) is caught into setError', async () => {
     h.state.me = user({ id: 99 });
-    h.state.users = [user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 2, username: 'bob' })];
     h.state.updateUser.mockRejectedValueOnce('strfail');
     render(<AdminDialog open onClose={vi.fn()} />);
     const bobRow = screen.getAllByRole('row').find((r) => within(r).queryByText('bob'))!;
@@ -139,8 +139,8 @@ describe('AdminDialog wide (table) layout', () => {
   });
 
   it('delete confirm true deletes, false does not; isMe disables', async () => {
-    h.state.me = user({ id: 1, github_login: 'me' });
-    h.state.users = [user({ id: 1, github_login: 'me' }), user({ id: 2, github_login: 'bob' })];
+    h.state.me = user({ id: 1, username: 'me' });
+    h.state.users = [user({ id: 1, username: 'me' }), user({ id: 2, username: 'bob' })];
     h.state.deleteUser.mockResolvedValue(undefined);
     render(<AdminDialog open onClose={vi.fn()} />);
     const rows = screen.getAllByRole('row');
@@ -174,10 +174,10 @@ describe('AdminDialog narrow (UserCard) layout', () => {
   beforeEach(() => setMatchMedia(true));
 
   it('renders UserCard with chips, name, formatted last sign-in', () => {
-    h.state.me = user({ id: 1, github_login: 'me' });
+    h.state.me = user({ id: 1, username: 'me' });
     h.state.users = [
-      user({ id: 1, github_login: 'me', name: 'My Name', last_login_at: '2024-06-01T08:30:00Z' }),
-      user({ id: 2, github_login: 'newbie', name: '', has_logged_in: false }),
+      user({ id: 1, username: 'me', name: 'My Name', last_login_at: '2024-06-01T08:30:00Z' }),
+      user({ id: 2, username: 'newbie', name: '', has_logged_in: false }),
     ];
     render(<AdminDialog open onClose={vi.fn()} />);
     expect(screen.getByText('you')).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('AdminDialog narrow (UserCard) layout', () => {
 
   it('UserCard toggles + delete work', async () => {
     h.state.me = user({ id: 99 });
-    h.state.users = [user({ id: 2, github_login: 'bob' })];
+    h.state.users = [user({ id: 2, username: 'bob' })];
     h.state.updateUser.mockResolvedValue(undefined);
     h.state.deleteUser.mockResolvedValue(undefined);
     render(<AdminDialog open onClose={vi.fn()} />);

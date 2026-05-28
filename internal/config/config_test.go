@@ -92,18 +92,53 @@ func TestLoadMissingDatabaseURL(t *testing.T) {
 	}
 }
 
-func TestLoadMissingGitHubCreds(t *testing.T) {
+func TestLoadNoOAuthProviderConfigured(t *testing.T) {
 	base(t)
 	t.Setenv("GITHUB_CLIENT_ID", "")
 	t.Setenv("GITHUB_CLIENT_SECRET", "")
+	t.Setenv("GOOGLE_CLIENT_ID", "")
+	t.Setenv("GOOGLE_CLIENT_SECRET", "")
 	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "GITHUB_CLIENT_ID") ||
-		!strings.Contains(err.Error(), "GITHUB_CLIENT_SECRET") {
-		t.Fatalf("expected both GitHub creds missing, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "at least one OAuth provider") {
+		t.Fatalf("expected no-provider error, got %v", err)
 	}
 }
 
-func TestLoadDevBypassSkipsGitHubCreds(t *testing.T) {
+func TestLoadHalfConfiguredProviderRejected(t *testing.T) {
+	for _, c := range []struct {
+		name, idVar, secretVar string
+	}{
+		{"GitHub", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"},
+		{"Google", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base(t)
+			t.Setenv(c.idVar, "id")
+			t.Setenv(c.secretVar, "")
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "must be set together") {
+				t.Fatalf("expected half-configured error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadGoogleAloneIsEnough(t *testing.T) {
+	base(t)
+	t.Setenv("GITHUB_CLIENT_ID", "")
+	t.Setenv("GITHUB_CLIENT_SECRET", "")
+	t.Setenv("GOOGLE_CLIENT_ID", "gid")
+	t.Setenv("GOOGLE_CLIENT_SECRET", "gsec")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.GoogleID != "gid" || cfg.GoogleSecret != "gsec" {
+		t.Errorf("Google creds not loaded: %+v", cfg)
+	}
+}
+
+func TestLoadDevBypassSkipsOAuthProviders(t *testing.T) {
 	base(t)
 	t.Setenv("GITHUB_CLIENT_ID", "")
 	t.Setenv("GITHUB_CLIENT_SECRET", "")

@@ -12,7 +12,7 @@ import (
 
 type UserDTO struct {
 	ID          int64      `json:"id"`
-	GitHubLogin string     `json:"github_login"`
+	Username    string     `json:"username"`
 	Name        string     `json:"name"`
 	AvatarURL   string     `json:"avatar_url"`
 	IsSuperuser bool       `json:"is_superuser"`
@@ -24,12 +24,14 @@ type UserDTO struct {
 func ToUserDTO(u *store.User) UserDTO {
 	return UserDTO{
 		ID:          u.ID,
-		GitHubLogin: u.GitHubLogin,
+		Username:    u.Username,
 		Name:        u.Name,
 		AvatarURL:   u.AvatarURL,
 		IsSuperuser: u.IsSuperuser,
 		IsActive:    u.IsActive,
-		HasLoggedIn: u.GitHubID != nil,
+		// A user has "logged in" once any provider has linked an identity
+		// to them, which last_login_at tracks.
+		HasLoggedIn: u.LastLoginAt != nil,
 		LastLoginAt: u.LastLoginAt,
 	}
 }
