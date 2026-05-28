@@ -136,6 +136,10 @@ describe('App', () => {
 });
 
 describe('friend-accept token bootstrap', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
   it('does not POST while anonymous; preserves the token in URL', async () => {
     state.auth = 'anonymous';
     window.history.pushState({}, '', '/?friend_accept=tok1');
@@ -183,5 +187,16 @@ describe('friend-accept token bootstrap', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(state.setError).toHaveBeenCalledWith("this invitation isn't for your account");
     expect(state.setNotice).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sessionStorage when URL token is absent (post-OAuth)', async () => {
+    h.api.acceptFriendToken.mockResolvedValueOnce({ already: true });
+    state.auth = 'authenticated';
+    window.history.pushState({}, '', '/');
+    window.sessionStorage.setItem('aerly.pending_friend_accept', 'stashed-tok');
+    render(<App />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.api.acceptFriendToken).toHaveBeenCalledWith('stashed-tok');
+    expect(window.sessionStorage.getItem('aerly.pending_friend_accept')).toBeNull();
   });
 });

@@ -17,6 +17,17 @@ import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
 import { api } from '../api/client';
 import type { AuthProvider } from '../api/types';
 
+const FRIEND_ACCEPT_STASH_KEY = 'aerly.pending_friend_accept';
+
+function stashPendingFriendAccept(): void {
+  try {
+    const tok = new URLSearchParams(window.location.search).get('friend_accept');
+    if (tok) window.sessionStorage.setItem(FRIEND_ACCEPT_STASH_KEY, tok);
+  } catch {
+    // sessionStorage unavailable (Safari private mode, etc.) — silently drop.
+  }
+}
+
 // Per-provider icon mapping. Unknown providers (or future additions) get a
 // generic icon rather than rendering an empty space.
 function iconFor(name: string) {
@@ -81,6 +92,7 @@ export default function Login() {
                   size="large"
                   startIcon={iconFor(p.name)}
                   href={`/auth/${p.name}/login`}
+                  onClick={stashPendingFriendAccept}
                 >
                   Sign in with {p.label}
                 </Button>
@@ -111,6 +123,7 @@ export default function Login() {
                 method="GET"
                 spacing={1.5}
                 sx={{ alignSelf: 'stretch' }}
+                onSubmit={stashPendingFriendAccept}
               >
                 <TextField
                   name="login"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Alert, Box, CircularProgress, CssBaseline, Snackbar, ThemeProvider } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV3';
@@ -27,6 +27,7 @@ export default function App() {
   const showAll = useStore((s) => s.showAll);
   const { mode } = useThemeMode();
   const theme = useMemo(() => createAppTheme(mode), [mode]);
+  const processedTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     void init();
@@ -47,8 +48,19 @@ export default function App() {
   useEffect(() => {
     if (auth !== 'authenticated') return;
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('friend_accept');
+    let token = params.get('friend_accept');
+    let fromStash = false;
+    if (!token) {
+      try {
+        token = window.sessionStorage.getItem('aerly.pending_friend_accept');
+        if (token) fromStash = true;
+      } catch {
+        token = null;
+      }
+    }
     if (!token) return;
+    if (processedTokenRef.current === token) return;
+    processedTokenRef.current = token;
     void (async () => {
       try {
         const r = await api.acceptFriendToken(token);
@@ -76,6 +88,13 @@ export default function App() {
         const url =
           window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
         window.history.replaceState({}, '', url);
+        if (fromStash) {
+          try {
+            window.sessionStorage.removeItem('aerly.pending_friend_accept');
+          } catch {
+            /* ignore */
+          }
+        }
       }
     })();
   }, [auth, users, refreshNotifications, setError, setNotice]);
