@@ -298,17 +298,91 @@ func TestCallbackProfileFetchFails(t *testing.T) {
 	}
 }
 
-func TestCallbackNotOnAllowlist(t *testing.T) {
+func TestCallbackOpenSignupCreatesUser(t *testing.T) {
 	h, pool := newTestHandler(t)
-	// Pre-seed another user so CountUsers > 0 (no bootstrap), and the
-	// octocat login is not invited → ErrNotFound → allowlist message.
+	// Pre-seed another user so CountUsers > 0 (the new octocat sign-in
+	// shouldn't be promoted to superuser via the bootstrap path).
 	_, _ = pool.Exec(context.Background(),
 		`INSERT INTO users (username, is_active) VALUES ('someoneelse', true)`)
 	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
 	c, state := stateCookie(h, false)
 	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
-	if !strings.Contains(w.Body.String(), "not on the allowlist") {
-		t.Errorf("unexpected: %s", w.Body.String())
+	res := w.Result()
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/" {
+		t.Fatalf("expected open-signup redirect to /, got %d %s",
+			res.StatusCode, res.Header.Get("Location"))
+	}
+	var sawSession bool
+	for _, ck := range res.Cookies() {
+		if ck.Name == SessionCookie && ck.Value != "" {
+			sawSession = true
+		}
+	}
+	if !sawSession {
+		t.Error("expected session cookie on open-signup success")
+	}
+	// And the new row landed in DB as a regular user — not silently
+	// promoted to superuser via the bootstrap path despite CountUsers > 0.
+	var (
+		octocatRows  int
+		isSuperuser  bool
+		isActive     bool
+	)
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&octocatRows); err != nil {
+		t.Fatalf("count octocat: %v", err)
+	}
+	if octocatRows != 1 {
+		t.Fatalf("expected exactly 1 octocat row, got %d", octocatRows)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT is_superuser, is_active FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&isSuperuser, &isActive); err != nil {
+		t.Fatalf("load octocat flags: %v", err)
+	}
+	if isSuperuser {
+		t.Error("non-bootstrap open signup must not be superuser")
+	}
+	if !isActive {
+		t.Error("open-signup user should be active")
+	}
+}
+
+func TestCallbackInactiveAccountRejected(t *testing.T) {
+	h, pool := newTestHandler(t)
+	// Seed an octocat user and deactivate them; the OAuth callback should
+	// then surface the "deactivated" error instead of creating a parallel
+	// row or letting them in.
+	_, _ = pool.Exec(context.Background(),
+		`INSERT INTO users (username, is_active) VALUES ('octocat', false)`)
+	// Link the GitHub identity to the (inactive) account so step-1 of
+	// LinkLogin matches and short-circuits onto the inactive guard. The
+	// stub ghServer returns id=555 for octocat.
+	_, _ = pool.Exec(context.Background(), `
+		INSERT INTO user_identities (user_id, provider, provider_user_id)
+		SELECT id, 'github', '555' FROM users WHERE username = 'octocat'`)
+	wireHTTP(t, h, ghServer(t, ghServerOpts{}))
+	c, state := stateCookie(h, false)
+	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
+	if !strings.Contains(w.Body.String(), "deactivated") {
+		t.Errorf("expected deactivated message, got: %s", w.Body.String())
+	}
+	// No parallel octocat row should have been created via the open-signup
+	// fallback, and no session cookie should have been issued.
+	var octocatRows int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&octocatRows); err != nil {
+		t.Fatalf("count octocat: %v", err)
+	}
+	if octocatRows != 1 {
+		t.Errorf("expected exactly 1 octocat row (the inactive seed), got %d", octocatRows)
+	}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == SessionCookie && ck.Value != "" {
+			t.Error("session cookie must not be set for inactive accounts")
+		}
 	}
 }
 

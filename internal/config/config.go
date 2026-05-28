@@ -24,10 +24,11 @@ type Config struct {
 	PollInterval    time.Duration
 	DevAuthBypass   bool
 
-	// Outbound mail (optional). Used for side-channel notifications such
-	// as "a new sign-in method was linked to your account". When
-	// MailFromAddress is empty the notifications are skipped and a
-	// warning is logged — the rest of the app keeps working.
+	// Outbound mail (always optional). Used for side-channel notifications
+	// like "a new sign-in method was linked to your account" plus
+	// friend-invite emails and other notification flows. When
+	// MailFromAddress is empty those flows are skipped (and a warning
+	// logged) — the in-app side of each feature keeps working.
 	//
 	// MailFromAddress doubles as the SMTP envelope sender, so its domain
 	// should match the address used in the From: header so DMARC/SPF can
@@ -133,7 +134,7 @@ func Load() (*Config, error) {
 			}
 			cfg.EmailIngestMaxBodyBytes = n
 		}
-		cfg.EmailIngestSendmail = getenv("EMAIL_INGEST_SENDMAIL", "/usr/sbin/sendmail")
+		cfg.EmailIngestSendmail = getenv("EMAIL_INGEST_SENDMAIL", cfg.SendmailPath)
 		cfg.LLMProvider = getenv("LLM_PROVIDER", "anthropic")
 		cfg.LLMModel = getenv("LLM_MODEL", "claude-haiku-4-5")
 		cfg.LLMAPIKey = os.Getenv("LLM_API_KEY")

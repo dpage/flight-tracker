@@ -220,16 +220,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request, p *Provider) 
 	}
 	user, outcome, err := h.Store.LinkLogin(r.Context(), profile, count == 0)
 	if errors.Is(err, store.ErrNotFound) {
-		who := profile.Username
-		if who == "" {
-			who = profile.Email
-		}
-		if who == "" {
-			who = "this account"
-		}
-		renderLoginError(w, fmt.Sprintf(
-			"%s is not on the allowlist. Ask the administrator to invite you.",
-			who))
+		// LinkLogin returns ErrNotFound only when the matched account is
+		// deactivated; open signups create a fresh user otherwise.
+		renderLoginError(w, "this account has been deactivated. "+
+			"Ask an administrator to re-enable it.")
 		return
 	}
 	if err != nil {

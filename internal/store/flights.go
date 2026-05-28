@@ -458,10 +458,11 @@ func (s *Store) SharedUserIDsByFlight(ctx context.Context, flightIDs []int64) (m
 	return out, rows.Err()
 }
 
-// VisibleUserIDs returns the union of {creator, passengers, share-list} for
-// a single flight — the exact set of user IDs that can see the flight
-// through any non-public, non-superuser-override path. Used by publishers
-// to populate the VisibleTo set on SSE events before broadcasting.
+// VisibleUserIDs returns the union of {creator, passengers, share-list,
+// creator's accepted friends} for a single flight — the exact set of user
+// IDs that can see the flight through any non-public, non-superuser-override
+// path. Used by publishers to populate the VisibleTo set on SSE events
+// before broadcasting.
 //
 // Callers should additionally consider Flight.IsPublic; this query
 // intentionally does NOT widen the set when is_public is true so the caller
@@ -472,7 +473,13 @@ func (s *Store) VisibleUserIDs(ctx context.Context, flightID int64) ([]int64, er
 		UNION
 		SELECT user_id FROM flight_passengers WHERE flight_id = $1
 		UNION
-		SELECT user_id FROM flight_shares     WHERE flight_id = $1`, flightID)
+		SELECT user_id FROM flight_shares     WHERE flight_id = $1
+		UNION
+		SELECT CASE WHEN f.user_low = flights.created_by
+		            THEN f.user_high ELSE f.user_low END
+		FROM friendships f, flights
+		WHERE flights.id = $1 AND f.status = 'accepted'
+		  AND flights.created_by IN (f.user_low, f.user_high)`, flightID)
 	if err != nil {
 		return nil, err
 	}
@@ -490,9 +497,10 @@ func (s *Store) VisibleUserIDs(ctx context.Context, flightID int64) ([]int64, er
 
 // ListVisibleFlights returns flights the viewer is allowed to see.
 // Visibility rule: created_by=viewer OR passenger OR share-list OR
-// is_public OR (showAllForSuperuser AND caller is superuser). The
-// superuser-show-all branch is gated by the caller — pass true only when
-// the request actually originated from a superuser session that opted in.
+// is_public OR friend-of-creator (accepted friendship) OR
+// (showAllForSuperuser AND caller is superuser). The superuser-show-all
+// branch is gated by the caller — pass true only when the request
+// actually originated from a superuser session that opted in.
 //
 // When showOld is false the result excludes flights whose effective
 // arrival (COALESCE actual_in, estimated_in, scheduled_in) is more than
@@ -509,7 +517,11 @@ func (s *Store) ListVisibleFlights(ctx context.Context, viewerID int64, showAllF
 		   OR EXISTS (SELECT 1 FROM flight_passengers
 		              WHERE flight_id = flights.id AND user_id = $1)
 		   OR EXISTS (SELECT 1 FROM flight_shares
-		              WHERE flight_id = flights.id AND user_id = $1))`)
+		              WHERE flight_id = flights.id AND user_id = $1)
+		   OR EXISTS (SELECT 1 FROM friendships f
+		              WHERE f.status = 'accepted'
+		                AND $1 IN (f.user_low, f.user_high)
+		                AND flights.created_by IN (f.user_low, f.user_high)))`)
 		args = append(args, viewerID)
 	}
 	if !showOld {
@@ -561,7 +573,11 @@ func (s *Store) CanView(ctx context.Context, flightID, viewerID int64, showAllFo
 			       OR EXISTS (SELECT 1 FROM flight_passengers
 			                  WHERE flight_id = $1 AND user_id = $2)
 			       OR EXISTS (SELECT 1 FROM flight_shares
-			                  WHERE flight_id = $1 AND user_id = $2)))`,
+			                  WHERE flight_id = $1 AND user_id = $2)
+			       OR EXISTS (SELECT 1 FROM friendships f
+			                  WHERE f.status = 'accepted'
+			                    AND $2 IN (f.user_low, f.user_high)
+			                    AND flights.created_by IN (f.user_low, f.user_high))))`,
 		flightID, viewerID).Scan(&ok)
 	return ok, err
 }

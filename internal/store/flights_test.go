@@ -630,13 +630,42 @@ func TestVisibilityHelpers(t *testing.T) {
 		t.Errorf("CanEdit missing id should be ErrNotFound, got %v", err)
 	}
 
-	// VisibleUserIDs: shared flight returns {alice, bob}.
+	// Friend-of-creator visibility: turning carol into alice's friend
+	// should grant carol read access to PV without an explicit share row.
+	if _, err := s.RequestFriendship(ctx, alice, carol); err != nil {
+		t.Fatalf("alice→carol request: %v", err)
+	}
+	if _, err := s.AcceptFriendship(ctx, carol, alice); err != nil {
+		t.Fatalf("carol accepts: %v", err)
+	}
+	if got := listIdents(carol, false); !want(got, []string{"PV", "SV", "PU"}) {
+		t.Errorf("carol after friending alice = %v, want all three", got)
+	}
+	ok, _ = s.CanView(ctx, private.ID, carol, false)
+	if !ok {
+		t.Errorf("carol CanView private after friending alice should be true")
+	}
+	// VisibleUserIDs now includes carol (the new friend) on alice's PV.
+	pvIDs, err := s.VisibleUserIDs(ctx, private.ID)
+	if err != nil {
+		t.Fatalf("VisibleUserIDs(PV): %v", err)
+	}
+	pvSet := map[int64]bool{}
+	for _, id := range pvIDs {
+		pvSet[id] = true
+	}
+	if !pvSet[carol] {
+		t.Errorf("VisibleUserIDs(PV) missing friend carol: %v", pvIDs)
+	}
+
+	// VisibleUserIDs: shared flight returns at least {alice, bob, carol}
+	// once carol is alice's friend (alice creator, bob share, carol friend).
 	ids, err := s.VisibleUserIDs(ctx, shared.ID)
 	if err != nil {
 		t.Fatalf("VisibleUserIDs: %v", err)
 	}
-	if len(ids) != 2 {
-		t.Errorf("VisibleUserIDs len = %d, want 2: %v", len(ids), ids)
+	if len(ids) != 3 {
+		t.Errorf("VisibleUserIDs len = %d, want 3: %v", len(ids), ids)
 	}
 }
 

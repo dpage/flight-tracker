@@ -36,6 +36,38 @@ func ToUserDTO(u *store.User) UserDTO {
 	}
 }
 
+// FriendshipDTO describes one row in /api/friends, oriented from the
+// viewer's perspective. FriendID is the *other* user in the pair, never
+// the viewer themselves. Direction is "outgoing" when the viewer initiated
+// a pending request, "incoming" when the viewer needs to act on someone
+// else's pending request, and "" (empty) for accepted friendships.
+type FriendshipDTO struct {
+	FriendID    int64      `json:"friend_id"`
+	Status      string     `json:"status"` // "pending" | "accepted"
+	Direction   string     `json:"direction,omitempty"`
+	RequestedAt time.Time  `json:"requested_at"`
+	AcceptedAt  *time.Time `json:"accepted_at,omitempty"`
+}
+
+// ToFriendshipDTO orients a *store.Friendship around viewerID and renders
+// it for the wire. Callers must ensure viewerID is one of the pair.
+func ToFriendshipDTO(f *store.Friendship, viewerID int64) FriendshipDTO {
+	dto := FriendshipDTO{
+		FriendID:    f.FriendID(viewerID),
+		Status:      f.Status,
+		RequestedAt: f.RequestedAt,
+		AcceptedAt:  f.AcceptedAt,
+	}
+	if f.Status == "pending" {
+		if f.RequestedBy == viewerID {
+			dto.Direction = "outgoing"
+		} else {
+			dto.Direction = "incoming"
+		}
+	}
+	return dto
+}
+
 type UserEmailDTO struct {
 	ID         int64      `json:"id"`
 	Address    string     `json:"address"`

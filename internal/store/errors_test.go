@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,23 +118,26 @@ func TestLinkLoginFirstQueryErrors(t *testing.T) {
 	}
 }
 
-// TestLinkLoginBootstrapInsertConflict covers the bootstrap INSERT error
-// branch: no identity match, no email match, no invitee match, bootstrap=true,
-// but the INSERT collides with the lower(username) unique index because a
-// linked user with the same username already exists.
-func TestLinkLoginBootstrapInsertConflict(t *testing.T) {
+// TestLinkLoginSuffixesUsernameOnConflict covers the username-allocation
+// fallback in the new-user INSERT branch: a second sign-in whose
+// provider-supplied username collides with an existing linked user gets a
+// numeric suffix so the open-signup flow doesn't 500.
+func TestLinkLoginSuffixesUsernameOnConflict(t *testing.T) {
 	s := newStore(t)
-	// Seed an existing linked user with username "dup".
 	if _, _, err := s.LinkLogin(ctx,
 		OAuthProfile{Provider: "github", ProviderUserID: "100", Username: "dup"}, true); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// Different provider_user_id, same username: no identity match, no email,
-	// step-3 invitee lookup excludes users with any linked identity, so the
-	// bootstrap INSERT collides on the lower(username) unique index.
-	_, _, err := s.LinkLogin(ctx,
-		OAuthProfile{Provider: "github", ProviderUserID: "200", Username: "dup"}, true)
-	if err == nil || errors.Is(err, ErrNotFound) {
-		t.Errorf("expected unique-violation error, got %v", err)
+	u, _, err := s.LinkLogin(ctx,
+		OAuthProfile{Provider: "github", ProviderUserID: "200", Username: "dup"}, false)
+	if err != nil {
+		t.Fatalf("conflicting username should be suffixed, got %v", err)
+	}
+	// Pin the specific "suffix the provider username" contract: the new
+	// row's username must derive from "dup" (a HasPrefix-then-different
+	// pair). A bare != "dup" check would also pass if allocation drifted
+	// to e.g. the email local-part or the "user" fallback.
+	if !strings.HasPrefix(u.Username, "dup") || u.Username == "dup" {
+		t.Errorf("expected a 'dup' + numeric suffix, got %q", u.Username)
 	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -233,6 +234,10 @@ const (
 	// LinkOutcomeCrossProvider — an existing user was located via a
 	// verified-email match and a new identity row was attached.
 	LinkOutcomeCrossProvider
+	// LinkOutcomeOpenSignup — no match anywhere, and this isn't the
+	// first user either; a fresh regular account was created via open
+	// signups.
+	LinkOutcomeOpenSignup
 )
 
 // LinkLogin records a successful OAuth sign-in. Lookup order:
@@ -244,11 +249,13 @@ const (
 //  3. invitee row with no identity yet, matched by username — only when
 //     p.Username is non-empty (i.e. GitHub providing a handle that matches
 //     an invitation). New identity row is added.
-//  4. no match: if bootstrapAsSuperuser is true the first user is created
-//     as a superuser; otherwise ErrNotFound.
+//  4. no match: a brand-new user row is created. bootstrapAsSuperuser
+//     promotes the very first user to superuser so the operator can manage
+//     the deployment; subsequent users are regular accounts.
 //
-// Returns ErrNotFound for both "no allowlist match" and "matched user is
-// inactive" — the caller surfaces the same allowlist error to the user.
+// Returns ErrNotFound only when the matched user is inactive — open
+// signups create a brand-new account in the no-match branch instead of
+// rejecting unknown identities.
 //
 // The returned LinkOutcome tells the caller which step matched so it can
 // trigger side effects (e.g. notifying the account holder of a new linked
@@ -278,32 +285,21 @@ func (s *Store) LinkLogin(ctx context.Context, p OAuthProfile, bootstrapAsSuperu
 	}
 
 	if u == nil {
-		// No match anywhere — bootstrap path.
-		if !bootstrapAsSuperuser {
-			return nil, 0, ErrNotFound
-		}
-		username := p.Username
-		if username == "" {
-			// Google etc. don't expose a username; fall back to the local
-			// part of the email, then to "user".
-			if at := strings.IndexByte(p.Email, '@'); at > 0 {
-				username = p.Email[:at]
-			} else {
-				username = "user"
-			}
-		}
-		row := tx.QueryRow(ctx, `
-			INSERT INTO users (username, name, avatar_url,
-				is_superuser, is_active, last_login_at)
-			VALUES ($1, $2, $3, TRUE, TRUE, NOW())
-			RETURNING `+userColumns,
-			username, p.Name, p.AvatarURL)
-		u = &User{}
-		if err := row.Scan(&u.ID, &u.Username, &u.Name, &u.AvatarURL,
-			&u.IsSuperuser, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		// No match anywhere — open signup. The first ever user is
+		// promoted to superuser via bootstrapAsSuperuser; everyone after
+		// them signs up as a regular account. insertNewUserTx wraps the
+		// INSERT in a SAVEPOINT-based retry loop so two concurrent
+		// first-signups racing past the username pre-check don't 500 on
+		// the lower(username) unique index.
+		u, err = insertNewUserTx(ctx, tx, p, bootstrapAsSuperuser)
+		if err != nil {
 			return nil, 0, err
 		}
-		outcome = LinkOutcomeBootstrap
+		if bootstrapAsSuperuser {
+			outcome = LinkOutcomeBootstrap
+		} else {
+			outcome = LinkOutcomeOpenSignup
+		}
 	} else {
 		if !u.IsActive {
 			return nil, 0, ErrNotFound
@@ -340,6 +336,12 @@ func (s *Store) LinkLogin(ctx context.Context, p OAuthProfile, bootstrapAsSuperu
 	if err := upsertEmailTx(ctx, tx, u.ID, p.Email); err != nil {
 		return nil, 0, err
 	}
+	// Convert any pending friend invites addressed to this user's verified
+	// emails into accepted friendships. Runs after upsertEmailTx so the
+	// email row exists.
+	if _, err := consumePendingInvitesTx(ctx, tx, u.ID); err != nil {
+		return nil, 0, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, 0, err
 	}
@@ -355,6 +357,60 @@ const (
 	findStepEmailMatch
 	findStepInviteeMatch
 )
+
+// insertNewUserTx creates a brand-new users row, picking a unique username
+// from p. Candidates are tried in order: provider login, email local-part,
+// then "user", followed by base + numeric suffix (base2, base3, …).
+//
+// Each candidate is attempted inside a SAVEPOINT so that two concurrent
+// first-signups racing past a pre-allocation EXISTS check (one wins the
+// insert, the other hits the lower(username) unique constraint) don't
+// poison the outer transaction — the loser rolls back to the savepoint
+// and retries with the next suffix instead of bubbling up a 500.
+func insertNewUserTx(ctx context.Context, tx pgx.Tx, p OAuthProfile, bootstrapAsSuperuser bool) (*User, error) {
+	base := strings.TrimSpace(p.Username)
+	if base == "" {
+		if at := strings.IndexByte(p.Email, '@'); at > 0 {
+			base = p.Email[:at]
+		}
+	}
+	if base == "" {
+		base = "user"
+	}
+	for attempt := 0; attempt < 1000; attempt++ {
+		candidate := base
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s%d", base, attempt+1)
+		}
+		if _, err := tx.Exec(ctx, `SAVEPOINT user_insert`); err != nil {
+			return nil, err
+		}
+		u := &User{}
+		err := tx.QueryRow(ctx, `
+			INSERT INTO users (username, name, avatar_url,
+				is_superuser, is_active, last_login_at)
+			VALUES ($1, $2, $3, $4, TRUE, NOW())
+			RETURNING `+userColumns,
+			candidate, p.Name, p.AvatarURL, bootstrapAsSuperuser,
+		).Scan(&u.ID, &u.Username, &u.Name, &u.AvatarURL,
+			&u.IsSuperuser, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		if err == nil {
+			if _, e := tx.Exec(ctx, `RELEASE SAVEPOINT user_insert`); e != nil {
+				return nil, e
+			}
+			return u, nil
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if _, e := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT user_insert`); e != nil {
+				return nil, e
+			}
+			continue
+		}
+		return nil, err
+	}
+	return nil, errors.New("could not allocate unique username")
+}
 
 // findUserForLogin runs the three lookup steps documented on LinkLogin and
 // returns (user, step, err). step is findStepNone only when user is nil.

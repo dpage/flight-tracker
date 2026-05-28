@@ -142,13 +142,22 @@ func TestLinkLoginBootstrapFirstUser(t *testing.T) {
 	}
 }
 
-func TestLinkLoginNotOnAllowlist(t *testing.T) {
+func TestLinkLoginOpenSignupCreatesUser(t *testing.T) {
 	s := newStore(t)
-	// Seed one user so this isn't bootstrap.
+	// Seed one user so this isn't the bootstrap path.
 	_, _ = s.InviteUser(ctx, InvitePayload{Username: "someone"})
-	_, _, err := s.LinkLogin(ctx, githubProfile("7", "stranger", "", "", ""), false)
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("uninvited login → ErrNotFound, got %v", err)
+	u, outcome, err := s.LinkLogin(ctx, githubProfile("7", "stranger", "Stranger", "x", ""), false)
+	if err != nil {
+		t.Fatalf("open signup should create a new user, got %v", err)
+	}
+	if u.IsSuperuser {
+		t.Error("non-bootstrap signup must not be superuser")
+	}
+	if u.Username != "stranger" {
+		t.Errorf("username should default to provider login, got %q", u.Username)
+	}
+	if outcome != LinkOutcomeOpenSignup {
+		t.Errorf("outcome = %v, want LinkOutcomeOpenSignup", outcome)
 	}
 }
 

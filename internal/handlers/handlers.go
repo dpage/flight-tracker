@@ -69,6 +69,11 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/flights/{id}/shares", req(http.HandlerFunc(a.addShare)))
 	mux.Handle("DELETE /api/flights/{id}/shares/{userId}", req(http.HandlerFunc(a.removeShare)))
 
+	mux.Handle("GET /api/friends", req(http.HandlerFunc(a.listFriends)))
+	mux.Handle("POST /api/friends/invite", req(http.HandlerFunc(a.inviteFriend)))
+	mux.Handle("POST /api/friends/{userId}/accept", req(http.HandlerFunc(a.acceptFriend)))
+	mux.Handle("DELETE /api/friends/{userId}", req(http.HandlerFunc(a.removeFriend)))
+
 	mux.Handle("GET /api/users", req(http.HandlerFunc(a.listUsers)))
 	mux.Handle("POST /api/users", sup(http.HandlerFunc(a.inviteUser)))
 	mux.Handle("PATCH /api/users/{id}", sup(http.HandlerFunc(a.updateUser)))

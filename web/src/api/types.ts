@@ -153,3 +153,22 @@ export interface UpdateUserInput {
   is_superuser?: boolean;
   is_active?: boolean;
 }
+
+export type FriendshipStatus = 'pending' | 'accepted';
+
+/** Direction is "" (empty) for accepted edges; the API leaves the field off
+ * for those rows, so the optional/empty mix is intentional. */
+export type FriendshipDirection = 'incoming' | 'outgoing' | '';
+
+export interface Friendship {
+  friend_id: number;
+  status: FriendshipStatus;
+  direction?: FriendshipDirection;
+  requested_at: string;
+  accepted_at?: string;
+}
+
+export interface InviteFriendInput {
+  email: string;
+  message?: string;
+}

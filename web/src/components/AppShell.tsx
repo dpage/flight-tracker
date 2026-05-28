@@ -25,6 +25,7 @@ import EmailIcon from '@mui/icons-material/EmailOutlined';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import LogoutIcon from '@mui/icons-material/Logout';
+import PeopleIcon from '@mui/icons-material/PeopleOutline';
 import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
 
 import { useStore } from '../state/store';
@@ -34,6 +35,7 @@ import FlightMap from './FlightMap';
 import FlightDialog from './FlightDialog';
 import AdminDialog from './AdminDialog';
 import EmailsDialog from './EmailsDialog';
+import FriendsDialog from './FriendsDialog';
 import StatsDialog from './StatsDialog';
 
 export default function AppShell() {
@@ -49,6 +51,7 @@ export default function AppShell() {
   });
   const [adminOpen, setAdminOpen] = useState(false);
   const [emailsOpen, setEmailsOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => !isNarrow);
@@ -109,6 +112,17 @@ export default function AppShell() {
               </MenuItem>
             )}
             <Divider />
+            <MenuItem
+              onClick={() => {
+                closeMenu();
+                setFriendsOpen(true);
+              }}
+            >
+              <ListItemIcon>
+                <PeopleIcon fontSize="small" />
+              </ListItemIcon>
+              Friends…
+            </MenuItem>
             {capabilities.email_ingest_enabled && (
               <MenuItem
                 onClick={() => {
@@ -233,6 +247,7 @@ export default function AppShell() {
       />
       <AdminDialog open={adminOpen} onClose={() => setAdminOpen(false)} />
       <EmailsDialog open={emailsOpen} onClose={() => setEmailsOpen(false)} />
+      <FriendsDialog open={friendsOpen} onClose={() => setFriendsOpen(false)} />
       <StatsDialog open={statsOpen} onClose={() => setStatsOpen(false)} />
     </Box>
   );

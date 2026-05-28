@@ -240,6 +240,33 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
     await api.deleteMyEmail(7);
   });
 
+  it('listFriends', async () => {
+    await api.listFriends();
+    expect(last()[0]).toBe('/api/friends');
+    expect(last()[1]?.method).toBe('GET');
+  });
+
+  it('inviteFriend posts the email body and resolves undefined (no-leak shape)', async () => {
+    const r = await api.inviteFriend({ email: 'bob@example.com', message: 'hi' });
+    expect(r).toBeUndefined();
+    expect(last()[0]).toBe('/api/friends/invite');
+    expect(last()[1]?.method).toBe('POST');
+    expect(last()[1]?.body).toBe(
+      JSON.stringify({ email: 'bob@example.com', message: 'hi' }),
+    );
+  });
+
+  it('acceptFriend', async () => {
+    await api.acceptFriend(5);
+    expect(last()[0]).toBe('/api/friends/5/accept');
+    expect(last()[1]?.method).toBe('POST');
+  });
+
+  it('removeFriend', async () => {
+    mockFetch(() => ({ status: 204, ok: true }) as unknown as Response);
+    await api.removeFriend(5);
+  });
+
   it('logout posts to /auth/logout and resolves undefined', async () => {
     const s = mockFetch(
       () => Promise.resolve({ status: 200, ok: true } as unknown as Response),

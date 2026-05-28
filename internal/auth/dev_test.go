@@ -80,14 +80,24 @@ func TestDevLoginBootstrapsAndSetsSession(t *testing.T) {
 	}
 }
 
-func TestDevLoginNotInvitedForbidden(t *testing.T) {
+func TestDevLoginOpenSignup(t *testing.T) {
 	h, pool := newTestHandler(t)
-	// Seed a user so this is no longer the bootstrap (count > 0); an
-	// uninvited login is then rejected with 403.
+	// Seed a user so the new sign-in isn't the bootstrap-superuser path.
 	testsupport.InsertUser(t, pool, "existing", false, true)
 	w := httptest.NewRecorder()
 	h.devLogin(w, httptest.NewRequest("GET", "/auth/dev-login?login=stranger", nil))
-	if w.Code != http.StatusForbidden {
-		t.Errorf("code = %d, want 403", w.Code)
+	// Open signups: the unknown login should be accepted and a session
+	// cookie issued, just like a normal first-time OAuth sign-in.
+	if w.Code != http.StatusFound {
+		t.Errorf("code = %d, want 302 (redirect on success)", w.Code)
+	}
+	var sawSession bool
+	for _, c := range w.Result().Cookies() {
+		if c.Name == SessionCookie && c.Value != "" {
+			sawSession = true
+		}
+	}
+	if !sawSession {
+		t.Error("expected session cookie")
 	}
 }

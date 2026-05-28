@@ -3,6 +3,8 @@ import type {
   Capabilities,
   CreateFlightInput,
   Flight,
+  Friendship,
+  InviteFriendInput,
   InviteUserInput,
   ResolveFlightInput,
   ResolvedFlight,
@@ -127,6 +129,16 @@ export const api = {
   updateUser: (id: number, patch: UpdateUserInput) =>
     request<User>('PATCH', `/api/users/${id}`, patch),
   deleteUser: (id: number) => request<void>('DELETE', `/api/users/${id}`),
+
+  listFriends: () => request<Friendship[]>('GET', '/api/friends'),
+  // The server returns the same response for "matched an existing user"
+  // and "queued an invite to an unknown address" so callers can't enumerate
+  // registered users. We expose a single Promise<void> reflecting that.
+  inviteFriend: (input: InviteFriendInput) =>
+    request<void>('POST', '/api/friends/invite', input).then(() => undefined),
+  acceptFriend: (userId: number) =>
+    request<Friendship>('POST', `/api/friends/${userId}/accept`),
+  removeFriend: (userId: number) => request<void>('DELETE', `/api/friends/${userId}`),
 
   listMyEmails: () => request<UserEmail[]>('GET', '/api/me/emails'),
   addMyEmail: (address: string) =>

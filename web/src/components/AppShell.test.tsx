@@ -58,6 +58,15 @@ vi.mock('./EmailsDialog', () => ({
       </div>
     ) : null,
 }));
+vi.mock('./FriendsDialog', () => ({
+  default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? (
+      <div>
+        FRIENDS_DIALOG
+        <button onClick={onClose}>CLOSE_FRIENDS_DIALOG</button>
+      </div>
+    ) : null,
+}));
 vi.mock('./StatsDialog', () => ({
   default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
     open ? (
@@ -154,6 +163,15 @@ describe('AppShell', () => {
     expect(screen.getByText('EMAILS_DIALOG')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'CLOSE_EMAILS_DIALOG' }));
     expect(screen.queryByText('EMAILS_DIALOG')).not.toBeInTheDocument();
+  });
+
+  it('opens FriendsDialog from the avatar menu', async () => {
+    render(<AppShell />);
+    await userEvent.click(screen.getByRole('button', { name: /account menu/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /^friends/i }));
+    expect(screen.getByText('FRIENDS_DIALOG')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'CLOSE_FRIENDS_DIALOG' }));
+    expect(screen.queryByText('FRIENDS_DIALOG')).not.toBeInTheDocument();
   });
 
   it('toggles the sidebar', async () => {
