@@ -156,13 +156,9 @@ func (p *Poller) publishFlightChange(ctx context.Context, id int64) {
 		slog.Error("sweep: marshal dto", "id", id, "err", err)
 		return
 	}
-	var visible []int64
-	if !fresh.IsPublic {
-		v, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
-		if err != nil {
-			slog.Warn("sweep: visibility lookup failed", "id", fresh.ID, "err", err)
-		}
-		visible = v
+	visible, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
+	if err != nil {
+		slog.Warn("sweep: visibility lookup failed", "id", fresh.ID, "err", err)
 	}
 	p.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }

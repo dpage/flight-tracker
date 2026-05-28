@@ -320,12 +320,9 @@ func (s *Service) publishFlight(ctx context.Context, id int64) {
 		slog.Error("emailingest: publishFlight marshal", "err", err, "id", id)
 		return
 	}
-	var visible []int64
-	if !f.IsPublic {
-		visible, err = s.Store.VisibleUserIDs(ctx, f.ID)
-		if err != nil {
-			slog.Warn("emailingest: publishFlight visibility", "err", err, "id", id)
-		}
+	visible, err := s.Store.VisibleUserIDs(ctx, f.ID)
+	if err != nil {
+		slog.Warn("emailingest: publishFlight visibility", "err", err, "id", id)
 	}
 	s.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }

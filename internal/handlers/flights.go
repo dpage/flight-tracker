@@ -237,12 +237,11 @@ func (a *API) deleteFlight(w http.ResponseWriter, r *http.Request) {
 	// SSE event reaches exactly the subscribers who had the flight in
 	// their state — once the row is gone we can no longer derive it.
 	viewers := a.flightViewers(r.Context(), id)
-	wasPublic := a.flightIsPublic(r.Context(), id)
 	if err := a.Store.DeleteFlight(r.Context(), id); err != nil {
 		handleStoreErr(w, err)
 		return
 	}
-	a.publishFlightDelete(id, viewers, wasPublic)
+	a.publishFlightDelete(id, viewers)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -469,17 +468,12 @@ func (a *API) flightViewers(ctx context.Context, id int64) []int64 {
 	return viewers
 }
 
-func (a *API) flightIsPublic(ctx context.Context, id int64) bool {
-	f, err := a.Store.FlightByID(ctx, id)
-	if err != nil {
-		return false
-	}
-	return f.IsPublic
-}
-
 // publishFlightDTO fans a flight.updated SSE event, scoped to the flight's
-// current visibility set. Public flights publish with empty VisibleTo (the
-// hub's broadcast-to-all path).
+// current visibility set. The viewer set already accounts for is_public
+// flights (creator's accepted friends are unioned in by VisibleUserIDs only
+// when the flight is public), so we never publish with an empty VisibleTo
+// for an actual flight — the hub's broadcast-to-all path is reserved for
+// system events with no per-flight scope.
 func (a *API) publishFlightDTO(ctx context.Context, dto api.FlightDTO) {
 	if a.Hub == nil {
 		return
@@ -489,10 +483,7 @@ func (a *API) publishFlightDTO(ctx context.Context, dto api.FlightDTO) {
 		slog.Error("publishFlightDTO: marshal", "err", err, "id", dto.ID)
 		return
 	}
-	var visible []int64
-	if !dto.IsPublic {
-		visible = a.flightViewers(ctx, dto.ID)
-	}
+	visible := a.flightViewers(ctx, dto.ID)
 	a.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }
 
@@ -563,7 +554,7 @@ func (a *API) backfillCoordsIfNeeded(ctx context.Context, f *store.Flight) *stor
 // can drop the flight from their local state. The visibility set must be
 // captured BEFORE the row is deleted — passed in here. Payload is a
 // minimal {"id":N} envelope since the row is gone.
-func (a *API) publishFlightDelete(id int64, viewers []int64, wasPublic bool) {
+func (a *API) publishFlightDelete(id int64, viewers []int64) {
 	if a.Hub == nil {
 		return
 	}
@@ -574,9 +565,5 @@ func (a *API) publishFlightDelete(id int64, viewers []int64, wasPublic bool) {
 		slog.Error("publishFlightDelete: marshal", "err", err, "id", id)
 		return
 	}
-	var visible []int64
-	if !wasPublic {
-		visible = viewers
-	}
-	a.Hub.Publish(sse.Event{Type: "flight.deleted", Data: payload, VisibleTo: visible})
+	a.Hub.Publish(sse.Event{Type: "flight.deleted", Data: payload, VisibleTo: viewers})
 }

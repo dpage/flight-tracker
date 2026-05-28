@@ -137,14 +137,12 @@ func (p *Poller) refresh(ctx context.Context, f *store.Flight, now time.Time) {
 		slog.Error("poller: marshal dto", "err", err)
 		return
 	}
-	// Scope the broadcast to viewers who can see this flight. Public
-	// flights publish with empty VisibleTo (the hub's broadcast path).
-	var visible []int64
-	if !fresh.IsPublic {
-		visible, err = p.Store.VisibleUserIDs(ctx, fresh.ID)
-		if err != nil {
-			slog.Warn("poller: visibility lookup failed", "id", fresh.ID, "err", err)
-		}
+	// Scope the broadcast to the flight's visibility set. VisibleUserIDs
+	// already includes the creator's accepted friends when is_public is
+	// true, so this always returns the correct set regardless of is_public.
+	visible, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
+	if err != nil {
+		slog.Warn("poller: visibility lookup failed", "id", fresh.ID, "err", err)
 	}
 	p.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }
