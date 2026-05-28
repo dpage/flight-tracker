@@ -104,6 +104,31 @@ func TestPublishFiltersByVisibleTo(t *testing.T) {
 	}
 }
 
+func TestUserPrivateBypassesShowAll(t *testing.T) {
+	h := NewHub()
+	ch, unsub := h.Subscribe(Subscription{ViewerID: 1, IsSuperuser: true, ShowAll: true})
+	defer unsub()
+
+	// Without UserPrivate, show_all delivers regardless of VisibleTo.
+	h.Publish(Event{Type: "flight.updated", Data: []byte("{}"), VisibleTo: []int64{99}})
+	h.Publish(Event{Type: "notifications.updated", Data: []byte("{}"), VisibleTo: []int64{99}, UserPrivate: true})
+
+	var got []string
+	deadline := time.After(50 * time.Millisecond)
+loop:
+	for {
+		select {
+		case ev := <-ch:
+			got = append(got, ev.Type)
+		case <-deadline:
+			break loop
+		}
+	}
+	if len(got) != 1 || got[0] != "flight.updated" {
+		t.Errorf("got events = %v, want exactly [flight.updated]", got)
+	}
+}
+
 func TestSuperuserWithoutShowAllRespectsVisibility(t *testing.T) {
 	h := NewHub()
 	ch, unsub := h.Subscribe(Subscription{ViewerID: 99, IsSuperuser: true, ShowAll: false})

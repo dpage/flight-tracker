@@ -16,8 +16,15 @@ type Event struct {
 	// VisibleTo restricts delivery to a specific set of viewer user IDs.
 	// nil / empty = public (delivered to every subscriber). Non-empty =
 	// delivered only to subscribers whose ViewerID is in the set, OR to
-	// superusers who opted into the show-all view.
+	// superusers who opted into the show-all view, UNLESS UserPrivate
+	// is true.
 	VisibleTo []int64
+	// UserPrivate, when true, means VisibleTo is authoritative even for
+	// superuser show-all subscriptions. Use for events whose payload is
+	// intrinsically scoped to a single user (e.g. notification counts) —
+	// a superuser dashboarding other users' flights should NOT receive
+	// another user's notification counts.
+	UserPrivate bool
 }
 
 // Subscription holds the per-connection state the hub needs to decide
@@ -72,7 +79,7 @@ func (h *Hub) Publish(e Event) {
 	defer h.mu.RUnlock()
 	visible := visibleSet(e.VisibleTo)
 	for ch, sub := range h.subs {
-		if !shouldDeliver(visible, sub) {
+		if !shouldDeliver(visible, sub, e.UserPrivate) {
 			continue
 		}
 		select {
@@ -104,11 +111,11 @@ func visibleSet(ids []int64) map[int64]struct{} {
 
 // shouldDeliver returns true if the event's visibility set (or its absence
 // — a nil set meaning "public") matches the subscription.
-func shouldDeliver(visible map[int64]struct{}, sub Subscription) bool {
+func shouldDeliver(visible map[int64]struct{}, sub Subscription, userPrivate bool) bool {
 	if visible == nil {
 		return true
 	}
-	if sub.IsSuperuser && sub.ShowAll {
+	if sub.IsSuperuser && sub.ShowAll && !userPrivate {
 		return true
 	}
 	_, ok := visible[sub.ViewerID]

@@ -48,8 +48,9 @@ func (a *API) publishNotifications(ctx context.Context, userID int64) {
 		return
 	}
 	a.Hub.Publish(sse.Event{
-		Type:      "notifications.updated",
-		Data:      payload,
-		VisibleTo: []int64{userID},
+		Type:        "notifications.updated",
+		Data:        payload,
+		VisibleTo:   []int64{userID},
+		UserPrivate: true,
 	})
 }
