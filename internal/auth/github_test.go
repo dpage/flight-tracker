@@ -321,6 +321,32 @@ func TestCallbackOpenSignupCreatesUser(t *testing.T) {
 	if !sawSession {
 		t.Error("expected session cookie on open-signup success")
 	}
+	// And the new row landed in DB as a regular user — not silently
+	// promoted to superuser via the bootstrap path despite CountUsers > 0.
+	var (
+		octocatRows  int
+		isSuperuser  bool
+		isActive     bool
+	)
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&octocatRows); err != nil {
+		t.Fatalf("count octocat: %v", err)
+	}
+	if octocatRows != 1 {
+		t.Fatalf("expected exactly 1 octocat row, got %d", octocatRows)
+	}
+	if err := pool.QueryRow(context.Background(),
+		`SELECT is_superuser, is_active FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&isSuperuser, &isActive); err != nil {
+		t.Fatalf("load octocat flags: %v", err)
+	}
+	if isSuperuser {
+		t.Error("non-bootstrap open signup must not be superuser")
+	}
+	if !isActive {
+		t.Error("open-signup user should be active")
+	}
 }
 
 func TestCallbackInactiveAccountRejected(t *testing.T) {
@@ -341,6 +367,22 @@ func TestCallbackInactiveAccountRejected(t *testing.T) {
 	w := callback(h, "github", url.Values{"code": {"c"}, "state": {state}}, c)
 	if !strings.Contains(w.Body.String(), "deactivated") {
 		t.Errorf("expected deactivated message, got: %s", w.Body.String())
+	}
+	// No parallel octocat row should have been created via the open-signup
+	// fallback, and no session cookie should have been issued.
+	var octocatRows int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM users WHERE lower(username) = 'octocat'`,
+	).Scan(&octocatRows); err != nil {
+		t.Fatalf("count octocat: %v", err)
+	}
+	if octocatRows != 1 {
+		t.Errorf("expected exactly 1 octocat row (the inactive seed), got %d", octocatRows)
+	}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == SessionCookie && ck.Value != "" {
+			t.Error("session cookie must not be set for inactive accounts")
+		}
 	}
 }
 

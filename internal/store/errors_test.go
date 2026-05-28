@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,7 +133,11 @@ func TestLinkLoginSuffixesUsernameOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conflicting username should be suffixed, got %v", err)
 	}
-	if u.Username == "dup" {
-		t.Errorf("expected a suffixed username, got %q", u.Username)
+	// Pin the specific "suffix the provider username" contract: the new
+	// row's username must derive from "dup" (a HasPrefix-then-different
+	// pair). A bare != "dup" check would also pass if allocation drifted
+	// to e.g. the email local-part or the "user" fallback.
+	if !strings.HasPrefix(u.Username, "dup") || u.Username == "dup" {
+		t.Errorf("expected a 'dup' + numeric suffix, got %q", u.Username)
 	}
 }
