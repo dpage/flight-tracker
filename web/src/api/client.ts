@@ -1,4 +1,5 @@
 import type {
+  AcceptFriendTokenResult,
   AuthProvider,
   Capabilities,
   CreateFlightInput,
@@ -6,6 +7,7 @@ import type {
   Friendship,
   InviteFriendInput,
   InviteUserInput,
+  Notifications,
   ResolveFlightInput,
   ResolvedFlight,
   UpdateFlightInput,
@@ -141,6 +143,10 @@ export const api = {
   removeFriend: (userId: number) => request<void>('DELETE', `/api/friends/${userId}`),
   cancelOutgoingInvite: (email: string) =>
     request<void>('DELETE', '/api/friends/outgoing', { email }).then(() => undefined),
+  acceptFriendToken: (token: string) =>
+    request<AcceptFriendTokenResult>('POST', '/api/friends/accept-token', { token }),
+
+  getNotifications: () => request<Notifications>('GET', '/api/notifications'),
 
   listMyEmails: () => request<UserEmail[]>('GET', '/api/me/emails'),
   addMyEmail: (address: string) =>

@@ -359,3 +359,35 @@ describe('api.getDevAuthBypassEnabled', () => {
     await expect(api.getDevAuthBypassEnabled()).resolves.toBe(false);
   });
 });
+
+describe('notifications', () => {
+  it('GET /api/notifications returns the typed body', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ friend_requests_pending: 3 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const n = await api.getNotifications();
+    expect(n.friend_requests_pending).toBe(3);
+    expect(fetchSpy).toHaveBeenCalledWith('/api/notifications', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it('POST /api/friends/accept-token sends the token in the body', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ already: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const r = await api.acceptFriendToken('abc.def');
+    expect(r.already).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/friends/accept-token',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ token: 'abc.def' }),
+      }),
+    );
+  });
+});

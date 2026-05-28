@@ -177,3 +177,18 @@ export interface InviteFriendInput {
   email: string;
   message?: string;
 }
+
+export interface Notifications {
+  /** Count of friendship rows where the viewer is the recipient and
+   *  status is still 'pending'. */
+  friend_requests_pending: number;
+}
+
+export interface AcceptFriendTokenResult {
+  /** Populated when the token resolved to a freshly-accepted row. */
+  friendship?: Friendship;
+  /** True when the pending row was already gone (already accepted,
+   *  cancelled by the inviter, etc.). Mutually exclusive with
+   *  `friendship`. */
+  already?: boolean;
+}
