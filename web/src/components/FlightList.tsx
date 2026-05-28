@@ -36,8 +36,8 @@ export default function FlightList({ onEditFlight }: Props) {
   const setShowAll = useStore((s) => s.setShowAll);
   const showOld = useStore((s) => s.showOld);
   const setShowOld = useStore((s) => s.setShowOld);
-  const showMineOnly = useStore((s) => s.showMineOnly);
-  const setShowMineOnly = useStore((s) => s.setShowMineOnly);
+  const showFriends = useStore((s) => s.showFriends);
+  const setShowFriends = useStore((s) => s.setShowFriends);
 
   const usersById = new Map(users.map((u) => [u.id, u]));
 
@@ -56,18 +56,18 @@ export default function FlightList({ onEditFlight }: Props) {
           flexWrap: 'wrap',
         }}
       >
-        <Tooltip title="Hide flights you didn't create and aren't a passenger on.">
+        <Tooltip title="Also show flights from friends that they shared with you.">
           <FormControlLabel
             control={
               <Switch
-                checked={showMineOnly}
-                onChange={(e) => setShowMineOnly(e.target.checked)}
+                checked={showFriends}
+                onChange={(e) => setShowFriends(e.target.checked)}
                 size="small"
               />
             }
             label={
               <Typography variant="caption" color="text.secondary">
-                Only my flights
+                Show friends flights
               </Typography>
             }
           />

@@ -8,7 +8,7 @@ const selectFlight = vi.fn();
 const deleteFlight = vi.fn();
 const setShowAll = vi.fn();
 const setShowOld = vi.fn();
-const setShowMineOnly = vi.fn();
+const setShowFriends = vi.fn();
 
 const state = {
   flights: [] as Flight[],
@@ -22,14 +22,15 @@ const state = {
   showAll: false,
   showOld: false,
   // Default OFF in tests so existing rendering assertions (which never set
-  // a passenger list) keep showing flights. Tests that exercise the toggle
-  // flip this on explicitly.
-  showMineOnly: false,
+  // a passenger list) keep showing flights — when OFF the filter
+  // restricts to creator/passenger flights, and tests that exercise the
+  // toggle flip this on explicitly.
+  showFriends: false,
   selectFlight,
   deleteFlight,
   setShowAll,
   setShowOld,
-  setShowMineOnly,
+  setShowFriends,
 };
 
 vi.mock('../state/store', () => ({
@@ -87,7 +88,7 @@ beforeEach(() => {
   state.selectedFlightId = null;
   state.showAll = false;
   state.showOld = true;
-  state.showMineOnly = false;
+  state.showFriends = false;
 });
 
 describe('FlightList', () => {
@@ -418,26 +419,26 @@ describe('FlightList', () => {
     expect(setShowOld).toHaveBeenCalledWith(true);
   });
 
-  it('renders the Only my flights toggle and reflects the showMineOnly state', () => {
-    state.showMineOnly = true;
-    render(<FlightList onEditFlight={vi.fn()} />);
-    const toggle = screen.getByLabelText(/only my flights/i) as HTMLInputElement;
-    expect(toggle).toBeInTheDocument();
-    expect(toggle.checked).toBe(true);
+  it('renders the Show friends flights toggle and reflects the showFriends state', () => {
+    state.showFriends = false;
+    state.me = { id: 1, username: 'me' } as User;
+    render(<FlightList onEditFlight={() => {}} />);
+    const toggle = screen.getByLabelText('Show friends flights');
+    expect(toggle).not.toBeChecked();
   });
 
-  it('clicking the Only my flights toggle calls setShowMineOnly(false) when it is on', async () => {
-    state.showMineOnly = true;
-    render(<FlightList onEditFlight={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText(/only my flights/i));
-    expect(setShowMineOnly).toHaveBeenCalledWith(false);
+  it('clicking the Show friends flights toggle calls setShowFriends(true) when it is off', async () => {
+    state.showFriends = false;
+    render(<FlightList onEditFlight={() => {}} />);
+    await userEvent.click(screen.getByLabelText('Show friends flights'));
+    expect(state.setShowFriends).toHaveBeenCalledWith(true);
   });
 
-  it('clicking the Only my flights toggle calls setShowMineOnly(true) when it is off', async () => {
-    state.showMineOnly = false;
-    render(<FlightList onEditFlight={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText(/only my flights/i));
-    expect(setShowMineOnly).toHaveBeenCalledWith(true);
+  it('clicking the Show friends flights toggle calls setShowFriends(false) when it is on', async () => {
+    state.showFriends = true;
+    render(<FlightList onEditFlight={() => {}} />);
+    await userEvent.click(screen.getByLabelText('Show friends flights'));
+    expect(state.setShowFriends).toHaveBeenCalledWith(false);
   });
 
   it('hides old flights by default and shows them when showOld is true', () => {
