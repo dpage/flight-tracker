@@ -25,8 +25,12 @@ export function createAppTheme(mode: ThemeMode): Theme {
 }
 
 export function loadPreference(): ThemePreference {
-  const raw = localStorage.getItem(THEME_STORAGE_KEY);
-  if (raw === 'light' || raw === 'dark' || raw === 'system') return raw;
+  try {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw === 'light' || raw === 'dark' || raw === 'system') return raw;
+  } catch {
+    // Ignore storage access failures and fall back to system.
+  }
   return 'system';
 }
 
@@ -54,7 +58,11 @@ function getPreference(): ThemePreference {
 
 export function setThemePreference(p: ThemePreference): void {
   currentPreference = p;
-  localStorage.setItem(THEME_STORAGE_KEY, p);
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, p);
+  } catch {
+    // Ignore persistence failures; keep runtime preference in sync.
+  }
   for (const l of listeners) l(p);
 }
 
