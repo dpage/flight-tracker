@@ -21,6 +21,7 @@ vi.mock('../api/client', async () => {
       addShare: vi.fn(),
       removeShare: vi.fn(),
       listUsers: vi.fn(),
+      listFriends: vi.fn(),
       inviteUser: vi.fn(),
       updateUser: vi.fn(),
       deleteUser: vi.fn(),
@@ -67,6 +68,9 @@ const initialState = useStore.getState();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Provide safe defaults for API methods called by refreshAll so tests that
+  // don't care about a particular slice don't need to set them up explicitly.
+  mockApi.listFriends.mockResolvedValue([]);
   useStore.setState(
     {
       auth: 'loading',
@@ -74,6 +78,7 @@ beforeEach(() => {
       capabilities: { resolver_available: false },
       flights: [],
       users: [],
+      friendships: [],
       selectedFlightId: null,
       error: null,
     },
@@ -88,6 +93,7 @@ beforeEach(() => {
       capabilities: { resolver_available: false },
       flights: [],
       users: [],
+      friendships: [],
       selectedFlightId: null,
       error: null,
     },
@@ -616,5 +622,35 @@ describe('notifications + notice slice', () => {
     const s = useStore.getState();
     expect(s.notifications.friend_requests_pending).toBe(0);
     expect(s.notice).toBeNull();
+  });
+});
+
+describe('friendships slice', () => {
+  beforeEach(() => {
+    mockApi.listFriends.mockReset();
+  });
+
+  it('starts empty and refreshFriendships loads from the API', async () => {
+    const fixtures = [
+      { user_low: 1, user_high: 2, friend_id: 2, status: 'accepted', requested_by: 1 },
+      { user_low: 1, user_high: 3, friend_id: 3, status: 'pending', requested_by: 1, direction: 'outgoing' },
+    ];
+    mockApi.listFriends.mockResolvedValueOnce(fixtures);
+
+    expect(useStore.getState().friendships).toEqual([]);
+    await useStore.getState().refreshFriendships();
+    expect(useStore.getState().friendships).toEqual(fixtures);
+  });
+
+  it('refreshAll() also refreshes friendships', async () => {
+    mockApi.listFlights.mockResolvedValue([]);
+    mockApi.listUsers.mockResolvedValue([]);
+    mockApi.listFriends.mockResolvedValue([
+      { user_low: 1, user_high: 2, friend_id: 2, status: 'accepted', requested_by: 1 },
+    ]);
+
+    await useStore.getState().refreshAll();
+    expect(mockApi.listFriends).toHaveBeenCalled();
+    expect(useStore.getState().friendships).toHaveLength(1);
   });
 });

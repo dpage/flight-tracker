@@ -5,6 +5,7 @@ import type {
   Capabilities,
   CreateFlightInput,
   Flight,
+  Friendship,
   InviteUserInput,
   Notifications,
   UpdateFlightInput,
@@ -24,6 +25,7 @@ interface AppState {
   capabilities: Capabilities;
   flights: Flight[];
   users: User[];
+  friendships: Friendship[];
   selectedFlightId: number | null;
   /** Wall-clock time (ms since epoch) of the most recent flight.updated event. */
   lastUpdateAt: number | null;
@@ -53,6 +55,7 @@ interface AppState {
   refreshAll: () => Promise<void>;
   refreshFlights: () => Promise<void>;
   refreshUsers: () => Promise<void>;
+  refreshFriendships: () => Promise<void>;
 
   createFlight: (input: CreateFlightInput) => Promise<void>;
   updateFlight: (id: number, patch: UpdateFlightInput) => Promise<void>;
@@ -144,6 +147,7 @@ export const useStore = create<AppState>((set, get) => ({
   capabilities: { resolver_available: false, poll_interval_sec: 60, email_ingest_enabled: false },
   flights: [],
   users: [],
+  friendships: [],
   selectedFlightId: null,
   lastUpdateAt: null,
   showAll: loadShowAll(),
@@ -168,7 +172,11 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   async refreshAll() {
-    await Promise.all([get().refreshFlights(), get().refreshUsers()]);
+    await Promise.all([
+      get().refreshFlights(),
+      get().refreshUsers(),
+      get().refreshFriendships(),
+    ]);
   },
 
   async refreshFlights() {
@@ -187,6 +195,15 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const users = await api.listUsers();
       set({ users });
+    } catch (err) {
+      set({ error: errorMessage(err) });
+    }
+  },
+
+  async refreshFriendships() {
+    try {
+      const friendships = await api.listFriends();
+      set({ friendships });
     } catch (err) {
       set({ error: errorMessage(err) });
     }
