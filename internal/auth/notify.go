@@ -2,15 +2,33 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
+	"net/mail"
 	"strings"
 	"time"
 
 	"github.com/dpage/aerly/internal/mailer"
 	"github.com/dpage/aerly/internal/store"
 )
+
+// validateHeaderAddress rejects values that would break RFC822 framing
+// (embedded CR/LF can inject extra headers) or that aren't parseable as
+// a mail address at all. Both inputs we'd write into From: / To: come
+// from arguably trusted sources — MailFromAddress is operator config,
+// matchEmail comes from a verified user_emails row — but the cost of
+// validating is trivial and the cost of a header-injection bug isn't.
+func validateHeaderAddress(v string) error {
+	if strings.ContainsAny(v, "\r\n") {
+		return errors.New("contains CR/LF")
+	}
+	if _, err := mail.ParseAddress(v); err != nil {
+		return err
+	}
+	return nil
+}
 
 // notifyIdentityLinked sends a heads-up email to the account holder when a
 // new OAuth identity has just been attached to their existing account via a
@@ -33,6 +51,16 @@ func (h *Handler) notifyIdentityLinked(ctx context.Context, user *store.User, pr
 	if to == "" {
 		slog.Warn("identity-link notify: no match email available",
 			"user_id", user.ID, "provider", prov.Name)
+		return
+	}
+	if err := validateHeaderAddress(h.MailFromAddress); err != nil {
+		slog.Warn("identity-link notify: invalid MAIL_FROM_ADDRESS, skipping",
+			"err", err, "user_id", user.ID, "provider", prov.Name)
+		return
+	}
+	if err := validateHeaderAddress(to); err != nil {
+		slog.Warn("identity-link notify: invalid recipient address, skipping",
+			"err", err, "user_id", user.ID, "provider", prov.Name)
 		return
 	}
 	send := h.SendNotification

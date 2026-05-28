@@ -116,3 +116,52 @@ func TestGreetName(t *testing.T) {
 		t.Errorf("greetName(whitespace, alice) = %q, want alice", got)
 	}
 }
+
+func TestValidateHeaderAddress(t *testing.T) {
+	for _, c := range []struct {
+		in      string
+		wantErr bool
+	}{
+		{"alice@example.com", false},
+		{"Alice <alice@example.com>", false},
+		{"", true},
+		{"alice@example.com\r\nBcc: attacker@evil", true},
+		{"alice@example.com\nX-Injected: bad", true},
+		{"not an address", true},
+	} {
+		err := validateHeaderAddress(c.in)
+		if c.wantErr && err == nil {
+			t.Errorf("validateHeaderAddress(%q) = nil, want error", c.in)
+		}
+		if !c.wantErr && err != nil {
+			t.Errorf("validateHeaderAddress(%q) = %v, want nil", c.in, err)
+		}
+	}
+}
+
+func TestNotifyIdentityLinked_SkippedOnInvalidFromAddress(t *testing.T) {
+	h, _ := newTestHandler(t)
+	cap := &captureSender{}
+	h.SendNotification = cap.send
+	// Header-injection attempt — must be rejected before send.
+	h.MailFromAddress = "noreply@aerly.test\r\nBcc: attacker@evil"
+	user := &store.User{ID: 42, Username: "alice"}
+	prov := h.providers["github"]
+	h.notifyIdentityLinked(context.Background(), user, prov, "alice@example.com")
+	if cap.calls != 0 {
+		t.Errorf("expected 0 sends when From address is malformed, got %d", cap.calls)
+	}
+}
+
+func TestNotifyIdentityLinked_SkippedOnInvalidRecipientAddress(t *testing.T) {
+	h, _ := newTestHandler(t)
+	cap := &captureSender{}
+	h.SendNotification = cap.send
+	h.MailFromAddress = "noreply@aerly.test"
+	user := &store.User{ID: 42, Username: "alice"}
+	prov := h.providers["github"]
+	h.notifyIdentityLinked(context.Background(), user, prov, "alice@example.com\r\nBcc: attacker@evil")
+	if cap.calls != 0 {
+		t.Errorf("expected 0 sends when recipient is malformed, got %d", cap.calls)
+	}
+}
