@@ -25,7 +25,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import { api } from '../api/client';
-import type { User } from '../api/types';
+import type { Friendship, User } from '../api/types';
 import { useStore } from '../state/store';
 
 interface Props {
@@ -119,11 +119,7 @@ export default function FriendsDialog({ open, onClose }: Props) {
     if (!window.confirm(`Cancel the invite to ${email}?`)) return;
     try {
       await api.cancelOutgoingInvite(email);
-      setFriends((rows) =>
-        rows.filter(
-          (r) => !(r.direction === 'outgoing' && r.status === 'pending' && r.email === email),
-        ),
-      );
+      await refreshFriendships();
     } catch (err) {
       reportError(err);
     }

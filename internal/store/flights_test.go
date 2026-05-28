@@ -995,13 +995,13 @@ func TestVisibleUserIDs_FriendGated(t *testing.T) {
 	passenger := mkUser(t, s)
 	sharedUser := mkUser(t, s)
 
-	if _, err := s.RequestFriendship(ctx, creator, friend); err != nil {
+	if _, err := s.RequestFriendship(ctx, creator, friend, ""); err != nil {
 		t.Fatalf("req friend: %v", err)
 	}
 	if _, err := s.AcceptFriendship(ctx, friend, creator); err != nil {
 		t.Fatalf("accept friend: %v", err)
 	}
-	if _, err := s.RequestFriendship(ctx, creator, pendingUser); err != nil {
+	if _, err := s.RequestFriendship(ctx, creator, pendingUser, ""); err != nil {
 		t.Fatalf("req pending: %v", err)
 	}
 

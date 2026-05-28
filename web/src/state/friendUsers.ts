@@ -17,7 +17,12 @@ export function useFriendUsers(): User[] {
     if (meId == null) return [];
     const friendIds = new Set<number>();
     for (const f of friendships) {
-      if (f.status === 'accepted') friendIds.add(f.friend_id);
+      // friend_id is omitted for outgoing pending invites whose target
+      // hasn't joined yet — they're carried by invited_email instead and
+      // can't be picked as flight passengers/sharees regardless.
+      if (f.status === 'accepted' && f.friend_id != null) {
+        friendIds.add(f.friend_id);
+      }
     }
     return users.filter((u) => friendIds.has(u.id));
   }, [meId, users, friendships]);

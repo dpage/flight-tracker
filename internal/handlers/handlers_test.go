@@ -195,7 +195,7 @@ func TestFlightCRUD(t *testing.T) {
 		t.Errorf("invalid create = %d, want 400", w.Code)
 	}
 	// Befriend pax before creating the flight with them as a passenger.
-	if _, err := e.store.RequestFriendship(context.Background(), uid, pax); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), uid, pax, ""); err != nil {
 		t.Fatalf("RequestFriendship: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), pax, uid); err != nil {
@@ -342,7 +342,7 @@ func TestFlightWritesPublishSSE(t *testing.T) {
 	}
 
 	// Adding a passenger publishes flight.updated. Befriend pax first.
-	if _, err := e.store.RequestFriendship(context.Background(), uid, pax); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), uid, pax, ""); err != nil {
 		t.Fatalf("RequestFriendship: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), pax, uid); err != nil {
@@ -580,7 +580,7 @@ func TestVisibilityFiltering(t *testing.T) {
 	}
 	idA := create("A1", false, nil)
 	// Befriend alice and bob before sharing B1 with bob.
-	if _, err := e.store.RequestFriendship(context.Background(), alice, bob); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), alice, bob, ""); err != nil {
 		t.Fatalf("RequestFriendship alice→bob: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), bob, alice); err != nil {
@@ -701,7 +701,7 @@ func TestShareEndpoints(t *testing.T) {
 		t.Errorf("bob add share = %d, want 403", w.Code)
 	}
 	// Befriend alice and bob before alice shares the flight with bob.
-	if _, err := e.store.RequestFriendship(context.Background(), alice, bob); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), alice, bob, ""); err != nil {
 		t.Fatalf("RequestFriendship: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), bob, alice); err != nil {
@@ -1035,7 +1035,7 @@ func TestAddPassengerRequiresFriendship(t *testing.T) {
 	}
 
 	// Befriend → succeeds.
-	if _, err := e.store.RequestFriendship(context.Background(), uid, stranger); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), uid, stranger, ""); err != nil {
 		t.Fatalf("RequestFriendship: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), stranger, uid); err != nil {
@@ -1086,7 +1086,7 @@ func TestAddShareRequiresFriendship(t *testing.T) {
 	}
 
 	// Friend → 204.
-	if _, err := e.store.RequestFriendship(context.Background(), uid, stranger); err != nil {
+	if _, err := e.store.RequestFriendship(context.Background(), uid, stranger, ""); err != nil {
 		t.Fatalf("RequestFriendship: %v", err)
 	}
 	if _, err := e.store.AcceptFriendship(context.Background(), stranger, uid); err != nil {
