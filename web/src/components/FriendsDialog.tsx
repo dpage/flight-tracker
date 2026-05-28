@@ -56,6 +56,7 @@ export default function FriendsDialog({ open, onClose }: Props) {
   const users = useStore((s) => s.users);
   const friends = useStore((s) => s.friendships);
   const refreshFriendships = useStore((s) => s.refreshFriendships);
+  const refreshUsers = useStore((s) => s.refreshUsers);
   const userIndex = useMemo(() => buildUserIndex(users), [users]);
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -69,9 +70,14 @@ export default function FriendsDialog({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    // Refresh users alongside friendships: the friend list may include
+    // users whose records weren't in state.users when the app first
+    // loaded (e.g. a fresh OAuth signup who accepted us after we logged
+    // in). Without this, friendLabel() falls back to "User #N".
     void refreshFriendships();
+    void refreshUsers();
     setInviteFeedback(null);
-  }, [open, refreshFriendships]);
+  }, [open, refreshFriendships, refreshUsers]);
 
   const handleInvite = async () => {
     const trimmed = email.trim();

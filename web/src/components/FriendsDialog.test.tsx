@@ -7,6 +7,7 @@ import type { Friendship, User } from '../api/types';
 const h = vi.hoisted(() => ({
   api: {
     listFriends: vi.fn(),
+    listUsers: vi.fn(),
     inviteFriend: vi.fn(),
     acceptFriend: vi.fn(),
     removeFriend: vi.fn(),
@@ -46,6 +47,13 @@ beforeEach(() => {
   // bleed-over of unconsumed mockResolvedValueOnce entries between tests.
   vi.resetAllMocks();
   h.api.listFriends.mockResolvedValue([]);
+  // FriendsDialog now refreshes users on open (so newly-accepted friends
+  // show their name instead of "User #N"). Default the mock to echo back
+  // whatever the test put in state.users — tests that want a stale-cache
+  // scenario can override.
+  h.api.listUsers.mockImplementation(() =>
+    Promise.resolve(useStore.getState().users),
+  );
   useStore.setState({
     friendships: [],
     users: [user({ id: 2, username: 'bob', name: 'Bob' })],
@@ -188,12 +196,29 @@ describe('FriendsDialog', () => {
   });
 
   it("falls back to User #N when the global user list doesn't include a friend", async () => {
-    // /api/users hasn't loaded the friend yet, so userIndex.get returns
-    // undefined and friendLabel hits the fallback branch.
+    // Even with the on-open refresh, if /api/users still doesn't return
+    // the friend's record (e.g. the server hasn't materialised it yet),
+    // userIndex.get returns undefined and friendLabel hits the fallback.
     h.api.listFriends.mockResolvedValue([friend({ friend_id: 99, status: 'accepted' })]);
+    h.api.listUsers.mockResolvedValue([]);
     useStore.setState({ users: [] });
     render(<FriendsDialog open onClose={() => {}} />);
     expect(await screen.findByText('User #99')).toBeInTheDocument();
+  });
+
+  it('refreshes users on open so newly-known friends show their name, not User #N', async () => {
+    // Repro for the "User #12" bug: dpage's session loaded before
+    // dave.page existed; dave.page later accepts. On reopening the
+    // dialog, the refresh pulls dave.page into state.users and the row
+    // labels with their display name instead of the fallback.
+    h.api.listFriends.mockResolvedValue([friend({ friend_id: 12, status: 'accepted' })]);
+    h.api.listUsers.mockResolvedValueOnce([
+      user({ id: 12, username: 'dave.page', name: 'Dave Page' }),
+    ]);
+    useStore.setState({ users: [] });
+    render(<FriendsDialog open onClose={() => {}} />);
+    expect(await screen.findByText('Dave Page')).toBeInTheDocument();
+    expect(screen.queryByText('User #12')).not.toBeInTheDocument();
   });
 
   it("trims an empty invite email instead of calling the server", async () => {

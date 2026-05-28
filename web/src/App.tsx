@@ -20,6 +20,8 @@ export default function App() {
   const notice = useStore((s) => s.notice);
   const setNotice = useStore((s) => s.setNotice);
   const refreshNotifications = useStore((s) => s.refreshNotifications);
+  const refreshFriendships = useStore((s) => s.refreshFriendships);
+  const refreshUsers = useStore((s) => s.refreshUsers);
   const applyFlightUpdate = useStore((s) => s.applyFlightUpdate);
   const applyFlightDelete = useStore((s) => s.applyFlightDelete);
   const applyNotificationsUpdate = useStore((s) => s.applyNotificationsUpdate);
@@ -39,11 +41,29 @@ export default function App() {
       {
         onFlight: (f) => applyFlightUpdate(f),
         onDelete: (id) => applyFlightDelete(id),
-        onNotifications: (n) => applyNotificationsUpdate(n),
+        onNotifications: (n) => {
+          applyNotificationsUpdate(n);
+          // The server fires notifications.updated whenever the viewer's
+          // friendship state changes (incoming invite, peer accepts/declines,
+          // viewer cancels, etc.). The badge count is one consequence; the
+          // friend list and the cached user records need to come along too,
+          // or the share/passenger pickers and the friends dialog will keep
+          // showing stale "User #N" entries for newly-accepted friends.
+          void refreshFriendships();
+          void refreshUsers();
+        },
       },
       { showAll },
     );
-  }, [auth, applyFlightUpdate, applyFlightDelete, applyNotificationsUpdate, showAll]);
+  }, [
+    auth,
+    applyFlightUpdate,
+    applyFlightDelete,
+    applyNotificationsUpdate,
+    refreshFriendships,
+    refreshUsers,
+    showAll,
+  ]);
 
   useEffect(() => {
     if (auth !== 'authenticated') return;

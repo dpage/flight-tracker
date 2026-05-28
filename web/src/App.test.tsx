@@ -20,6 +20,8 @@ const h = vi.hoisted(() => {
       setError: vi.fn(),
       setNotice: vi.fn(),
       refreshNotifications: vi.fn(),
+      refreshFriendships: vi.fn(),
+      refreshUsers: vi.fn(),
       applyFlightUpdate: vi.fn(),
       applyFlightDelete: vi.fn(),
       applyNotificationsUpdate: vi.fn(),
@@ -79,6 +81,12 @@ describe('App', () => {
     expect(state.applyFlightDelete).toHaveBeenCalledWith(7);
     handlers.onNotifications({ friend_requests_pending: 2 });
     expect(state.applyNotificationsUpdate).toHaveBeenCalledWith({ friend_requests_pending: 2 });
+    // notifications.updated fires on any friendship state change for the
+    // viewer — the friend list and the cached user records have to be
+    // refreshed so newly-accepted friends show up in the share/passenger
+    // pickers and the friends dialog (instead of "User #N").
+    expect(state.refreshFriendships).toHaveBeenCalled();
+    expect(state.refreshUsers).toHaveBeenCalled();
   });
 
   it('renders the success-notice snackbar and clears it via the close button', async () => {
