@@ -287,20 +287,12 @@ func (s *Store) LinkLogin(ctx context.Context, p OAuthProfile, bootstrapAsSuperu
 	if u == nil {
 		// No match anywhere — open signup. The first ever user is
 		// promoted to superuser via bootstrapAsSuperuser; everyone after
-		// them signs up as a regular account.
-		username, err := allocateUsernameTx(ctx, tx, p)
+		// them signs up as a regular account. insertNewUserTx wraps the
+		// INSERT in a SAVEPOINT-based retry loop so two concurrent
+		// first-signups racing past the username pre-check don't 500 on
+		// the lower(username) unique index.
+		u, err = insertNewUserTx(ctx, tx, p, bootstrapAsSuperuser)
 		if err != nil {
-			return nil, 0, err
-		}
-		row := tx.QueryRow(ctx, `
-			INSERT INTO users (username, name, avatar_url,
-				is_superuser, is_active, last_login_at)
-			VALUES ($1, $2, $3, $4, TRUE, NOW())
-			RETURNING `+userColumns,
-			username, p.Name, p.AvatarURL, bootstrapAsSuperuser)
-		u = &User{}
-		if err := row.Scan(&u.ID, &u.Username, &u.Name, &u.AvatarURL,
-			&u.IsSuperuser, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		if bootstrapAsSuperuser {
@@ -366,12 +358,16 @@ const (
 	findStepInviteeMatch
 )
 
-// allocateUsernameTx picks a unique username for a brand-new user. Prefers
-// the provider-supplied username (GitHub login), then the local part of
-// the verified email, then "user". A numeric suffix is appended on
-// collision until a free slot is found, since open signups mean we can no
-// longer rely on the operator having pre-curated usernames.
-func allocateUsernameTx(ctx context.Context, tx pgx.Tx, p OAuthProfile) (string, error) {
+// insertNewUserTx creates a brand-new users row, picking a unique username
+// from p. Candidates are tried in order: provider login, email local-part,
+// then "user", followed by base + numeric suffix (base2, base3, …).
+//
+// Each candidate is attempted inside a SAVEPOINT so that two concurrent
+// first-signups racing past a pre-allocation EXISTS check (one wins the
+// insert, the other hits the lower(username) unique constraint) don't
+// poison the outer transaction — the loser rolls back to the savepoint
+// and retries with the next suffix instead of bubbling up a 500.
+func insertNewUserTx(ctx context.Context, tx pgx.Tx, p OAuthProfile, bootstrapAsSuperuser bool) (*User, error) {
 	base := strings.TrimSpace(p.Username)
 	if base == "" {
 		if at := strings.IndexByte(p.Email, '@'); at > 0 {
@@ -381,20 +377,39 @@ func allocateUsernameTx(ctx context.Context, tx pgx.Tx, p OAuthProfile) (string,
 	if base == "" {
 		base = "user"
 	}
-	candidate := base
-	for suffix := 2; suffix < 1000; suffix++ {
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM users WHERE lower(username) = lower($1))`,
-			candidate).Scan(&exists); err != nil {
-			return "", err
+	for attempt := 0; attempt < 1000; attempt++ {
+		candidate := base
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s%d", base, attempt+1)
 		}
-		if !exists {
-			return candidate, nil
+		if _, err := tx.Exec(ctx, `SAVEPOINT user_insert`); err != nil {
+			return nil, err
 		}
-		candidate = fmt.Sprintf("%s%d", base, suffix)
+		u := &User{}
+		err := tx.QueryRow(ctx, `
+			INSERT INTO users (username, name, avatar_url,
+				is_superuser, is_active, last_login_at)
+			VALUES ($1, $2, $3, $4, TRUE, NOW())
+			RETURNING `+userColumns,
+			candidate, p.Name, p.AvatarURL, bootstrapAsSuperuser,
+		).Scan(&u.ID, &u.Username, &u.Name, &u.AvatarURL,
+			&u.IsSuperuser, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		if err == nil {
+			if _, e := tx.Exec(ctx, `RELEASE SAVEPOINT user_insert`); e != nil {
+				return nil, e
+			}
+			return u, nil
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if _, e := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT user_insert`); e != nil {
+				return nil, e
+			}
+			continue
+		}
+		return nil, err
 	}
-	return "", errors.New("could not allocate unique username")
+	return nil, errors.New("could not allocate unique username")
 }
 
 // findUserForLogin runs the three lookup steps documented on LinkLogin and

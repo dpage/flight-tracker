@@ -114,6 +114,13 @@ func scanFriendship(row pgx.Row) (*Friendship, error) {
 //     accepts the first).
 //   - status='pending' with requesterID as the original requester → returns
 //     the existing row (no-op duplicate).
+//
+// Concurrent cross-direction requests are handled atomically: the INSERT
+// uses ON CONFLICT DO NOTHING so the PRIMARY KEY arbitrates the race,
+// then on conflict we fall through to a locked SELECT and apply the same
+// no-op / accept-cross-direction logic. Two simultaneous A→B and B→A
+// calls can no longer both miss the lock and one of them fail on the
+// PRIMARY KEY constraint.
 func (s *Store) RequestFriendship(ctx context.Context, requesterID, recipientID int64) (*Friendship, error) {
 	if requesterID == recipientID {
 		return nil, errors.New("cannot friend yourself")
@@ -125,51 +132,55 @@ func (s *Store) RequestFriendship(ctx context.Context, requesterID, recipientID 
 	}
 	defer tx.Rollback(ctx)
 
+	// Fast path: try to claim the (low, high) slot. RETURNING is empty
+	// when another transaction already holds the row — fall through to
+	// the existing-row branch below.
+	inserted, err := scanFriendship(tx.QueryRow(ctx, `
+		INSERT INTO friendships (user_low, user_high, status, requested_by)
+		VALUES ($1, $2, 'pending', $3)
+		ON CONFLICT (user_low, user_high) DO NOTHING
+		RETURNING user_low, user_high, status, requested_by, requested_at, accepted_at`,
+		low, high, requesterID))
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return inserted, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+
+	// Conflict: a row exists. Lock it and decide between no-op (already
+	// accepted, or duplicate same-direction pending) and cross-direction
+	// implicit accept.
 	existing, err := scanFriendship(tx.QueryRow(ctx, `
 		SELECT user_low, user_high, status, requested_by, requested_at, accepted_at
 		FROM friendships WHERE user_low = $1 AND user_high = $2
 		FOR UPDATE`,
 		low, high))
-	switch {
-	case err == nil:
-		// Already accepted, or duplicate request from same side: no-op.
-		if existing.Status == "accepted" || existing.RequestedBy == requesterID {
-			if err := tx.Commit(ctx); err != nil {
-				return nil, err
-			}
-			return existing, nil
-		}
-		// Cross-direction pending request → accept.
-		upd, err := scanFriendship(tx.QueryRow(ctx, `
-			UPDATE friendships
-			SET status = 'accepted', accepted_at = NOW()
-			WHERE user_low = $1 AND user_high = $2
-			RETURNING user_low, user_high, status, requested_by, requested_at, accepted_at`,
-			low, high))
-		if err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return upd, nil
-	case errors.Is(err, ErrNotFound):
-		// Insert fresh pending row.
-		row, err := scanFriendship(tx.QueryRow(ctx, `
-			INSERT INTO friendships (user_low, user_high, status, requested_by)
-			VALUES ($1, $2, 'pending', $3)
-			RETURNING user_low, user_high, status, requested_by, requested_at, accepted_at`,
-			low, high, requesterID))
-		if err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return row, nil
-	default:
+	if err != nil {
 		return nil, err
 	}
+	if existing.Status == "accepted" || existing.RequestedBy == requesterID {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return existing, nil
+	}
+	upd, err := scanFriendship(tx.QueryRow(ctx, `
+		UPDATE friendships
+		SET status = 'accepted', accepted_at = NOW()
+		WHERE user_low = $1 AND user_high = $2
+		RETURNING user_low, user_high, status, requested_by, requested_at, accepted_at`,
+		low, high))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return upd, nil
 }
 
 // AcceptFriendship transitions a pending row from requested_by ≠ viewerID
@@ -228,19 +239,30 @@ func (s *Store) UpsertPendingFriendInvite(ctx context.Context, inviterID int64, 
 
 // consumePendingInvitesTx converts every pending_friend_invite addressed at
 // any of the verified email addresses owned by userID into an accepted
-// friendship, then deletes those pending rows. Idempotent: if the
-// friendship already exists in any state it's promoted to accepted (the
-// invitation implicitly accepts an outstanding cross-direction request).
+// friendship. The DELETE and the read of the resulting inviter_ids are a
+// single statement (DELETE ... RETURNING inside a CTE) so a concurrent
+// INSERT into pending_friend_invites can't be silently dropped — under
+// READ COMMITTED, the DELETE's snapshot determines exactly which rows we
+// claim, and any invite that arrives after that stays queued for the
+// next sign-in. Idempotent: an existing friendship in any state is
+// promoted to accepted (the invitation implicitly accepts an outstanding
+// cross-direction request); preserving accepted_at via COALESCE keeps the
+// original acceptance timestamp.
 //
 // Returns the IDs of users who became newly-accepted friends so the caller
-// can notify them.
+// can notify them. Self-invite rows (inviter_id == userID, possible if a
+// user invited their own then-unverified address) are deleted by the CTE
+// but excluded from the returned set.
 func consumePendingInvitesTx(ctx context.Context, tx pgx.Tx, userID int64) ([]int64, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT DISTINCT p.inviter_id
-		FROM pending_friend_invites p
-		JOIN user_emails e ON lower(e.address) = p.email_lower
-		WHERE e.user_id = $1 AND e.verified = TRUE
-		  AND p.inviter_id <> $1`,
+		WITH claimed AS (
+			DELETE FROM pending_friend_invites
+			WHERE email_lower IN (
+				SELECT lower(address) FROM user_emails
+				WHERE user_id = $1 AND verified = TRUE)
+			RETURNING inviter_id
+		)
+		SELECT DISTINCT inviter_id FROM claimed WHERE inviter_id <> $1`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -270,17 +292,6 @@ func consumePendingInvitesTx(ctx context.Context, tx pgx.Tx, userID int64) ([]in
 			low, high, inviter); err != nil {
 			return nil, err
 		}
-	}
-
-	// Drop every matching pending row, including ones from the same inviter
-	// that conflicted (no-op INSERT above) so the queue stays clean.
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM pending_friend_invites
-		WHERE email_lower IN (
-			SELECT lower(address) FROM user_emails
-			WHERE user_id = $1 AND verified = TRUE)`,
-		userID); err != nil {
-		return nil, err
 	}
 	return inviters, nil
 }

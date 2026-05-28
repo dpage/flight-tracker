@@ -7,12 +7,19 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/dpage/aerly/internal/api"
 	"github.com/dpage/aerly/internal/auth"
 	"github.com/dpage/aerly/internal/mailer"
 	"github.com/dpage/aerly/internal/store"
 )
+
+// friendEmailSendTimeout bounds each outbound sendmail invocation so a
+// stalled MTA can't pin the request worker. The handler still waits for
+// the send before responding (to keep delivery best-effort synchronous),
+// but a hung send aborts at this deadline and the request returns.
+const friendEmailSendTimeout = 5 * time.Second
 
 // inviteFriendAcceptedBody is the response every successful POST to
 // /api/friends/invite returns, regardless of whether the email matched a
@@ -146,7 +153,9 @@ func (a *API) sendFriendRequestNotification(ctx context.Context, inviter, recipi
 		InviterLogin: inviter.Username,
 		Message:      message,
 	})
-	if err := mailer.Send(ctx, a.Config.SendmailPath, a.Config.MailFromAddress, msg); err != nil {
+	sendCtx, cancel := context.WithTimeout(ctx, friendEmailSendTimeout)
+	defer cancel()
+	if err := mailer.Send(sendCtx, a.Config.SendmailPath, a.Config.MailFromAddress, msg); err != nil {
 		slog.Error("friend invite: send notification failed", "err", err)
 	}
 }
@@ -165,7 +174,9 @@ func (a *API) sendFriendInviteEmail(ctx context.Context, inviter *store.User, to
 		InviterLogin: inviter.Username,
 		Message:      message,
 	})
-	if err := mailer.Send(ctx, a.Config.SendmailPath, a.Config.MailFromAddress, msg); err != nil {
+	sendCtx, cancel := context.WithTimeout(ctx, friendEmailSendTimeout)
+	defer cancel()
+	if err := mailer.Send(sendCtx, a.Config.SendmailPath, a.Config.MailFromAddress, msg); err != nil {
 		slog.Error("friend invite: send invite failed", "err", err)
 	}
 }
