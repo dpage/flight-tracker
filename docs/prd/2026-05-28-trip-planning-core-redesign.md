@@ -148,6 +148,13 @@ whole round trip or a multi-leg journey; Aerly groups those into one plan with
 several parts rather than a scatter of unrelated entries. This effortless capture
 is the feature we expect users to fall in love with.
 
+**Which trip a plan lands in.** When you add via the in-app dialog you pick the
+trip. Forwarded **email** has no such moment, so Aerly files it into the trip
+whose dates best fit the plan — i.e. when the plan's dates fall within, span, or
+sit right next to an existing trip's dates — and creates a new trip only when
+nothing's close. Because that guess can be wrong, **any plan can be moved to a
+different trip** afterwards.
+
 ### 6.4 Sharing & privacy
 
 A trip can be shared with friends. There are three trip-level roles:
@@ -262,8 +269,9 @@ a schedule or gate change, a cancellation, or a diversion — it alerts the peop
 on that flight both **in-app** (a notification, with the timeline updating live)
 and by **email**. Alerts go to the plan's owner and its passengers by default,
 and a viewer can opt in to receive them too. Each person chooses their channels
-and sets a threshold so trivial changes (a two-minute slip) don't nag them. This
-is the bridge between the planning side of
+and sets a delay threshold (around 15 minutes by default) so trivial changes (a
+two-minute slip) don't nag them; cancellations and diversions always alert
+regardless. This is the bridge between the planning side of
 Aerly and the live tracker: your itinerary tells you the moment it's no longer
 accurate.
 

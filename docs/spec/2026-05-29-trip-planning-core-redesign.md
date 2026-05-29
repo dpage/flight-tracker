@@ -141,6 +141,7 @@ CREATE TABLE plan_parts (
     status        TEXT NOT NULL DEFAULT 'planned' -- planned|confirmed|cancelled
                     CHECK (status IN ('planned','confirmed','cancelled')),
     supersedes_id BIGINT REFERENCES plan_parts(id) ON DELETE SET NULL,
+    dismissed_at  TIMESTAMPTZ,                    -- "tidied away" superseded part
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -402,6 +403,7 @@ DELETE /api/plans/{id}/passengers/{userId}
 PUT    /api/plans/{id}/visibility       set mode + member list
 POST   /api/plans/{id}/move             reassign the plan (+ its parts) to another trip
 PATCH  /api/plan-parts/{id}             edit a part (time/place/status)
+POST   /api/plan-parts/{id}/dismiss     tidy away a superseded part (set dismissed_at)
 
 POST   /api/trips/{id}/ingest           paste/upload → proposed plans (no commit)
 POST   /api/trips/{id}/ingest/confirm   commit confirmed/edited proposals
@@ -475,12 +477,18 @@ flight parts in the trip:
 
 1. By `confirmation_ref` / PNR equality (high confidence).
 2. Else by `ident` + same calendar day, or same `origin_iata/dest_iata` + date
-   proximity (medium).
+   proximity (medium). Candidates are scoped to the trip and the **traveller**
+   (PRD §6.9: "by traveller and route") — i.e. prefer parts whose plan shares a
+   passenger with the incoming one — so a rebooking matches the right person's
+   flight rather than a trip-mate's.
 
 A match is returned as a *proposed supersession* in the proposal payload, never
 auto-applied (PRD-resolved: always confirm). On confirm, insert the new part
 with `supersedes_id` = matched part; set the old part's `status='cancelled'` and
-mark it superseded (it stays, greyed, until tidied). The front end renders both.
+mark it superseded. It stays on the timeline, greyed, until the user **tidies it
+away**: `POST /api/plan-parts/{id}/dismiss` stamps `dismissed_at`, after which
+the timeline omits it (PRD §6.2/§6.9 "superseded entries can be tidied away").
+The front end renders both old and new until then.
 
 ---
 
@@ -566,11 +574,19 @@ trip-list ↔ trip-detail (and trip sub-tabs Timeline / Map); keep everything be
 dialog-driven as today.
 
 - **`TripList`** replaces the map as home: Upcoming / Happening now / Past
-  groupings; "New trip" primary action (was "Add flight" in `AppShell.tsx`).
+  groupings; "New trip" primary action (was "Add flight" in `AppShell.tsx`). A
+  trip is classified by its effective span (min/max of its parts, falling back to
+  `starts_on`/`ends_on`) against now: ends in the future and starts later =
+  Upcoming, spans now = Happening now, wholly past = Past; date-less trips sort
+  under Upcoming.
 - **`TripTimeline`** (default trip view): day-grouped vertical list of parts,
-  sorted by `effective_at`, local-day headers from part tz; multi-night hotels as
-  a band; superseded parts greyed. **`TripMap`** as a secondary tab reusing
-  `FlightMap`/MapLibre.
+  sorted by `effective_at`, local-day headers from part tz. Parts of the **same
+  plan** are visually tied together as one booking even when days apart (a shared
+  accent/connector and a tap-through to the whole plan) — so a return flight's
+  outbound and inbound legs, or a hotel's check-in and check-out, read as one
+  booking (PRD §6.2). Multi-night hotels render as a band across their nights;
+  superseded parts show greyed until dismissed, then drop off. **`TripMap`** as a
+  secondary tab reusing `FlightMap`/MapLibre.
 - **`AddToTripDialog`**: tabs Manual / Paste / Upload / Email, all hitting the
   ingest endpoints; a confirm step listing proposed plans (flagging low
   confidence and proposed supersessions).
