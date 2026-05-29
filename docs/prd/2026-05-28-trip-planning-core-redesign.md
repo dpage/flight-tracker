@@ -162,9 +162,10 @@ until they share it. Shared trips update live for everyone viewing them — if o
 person adds the dinner reservation, it appears on everyone's timeline.
 
 Separately, a person can be a **passenger** on an individual plan (e.g. on a
-specific flight). Being a passenger grants visibility of that one plan; it does
-not by itself grant access to the rest of the trip — though the owner can also
-add them as a viewer if they want them to see everything.
+specific flight). Adding someone as a passenger automatically makes them a
+**viewer** of the trip — they're genuinely on it, so they can see the whole
+itinerary. Per-plan privacy (below) still lets the owner keep individual plans
+hidden from them.
 
 **Per-plan privacy.** By default every plan is visible to everyone who can see
 the trip. The owner (or an editor) can override an individual plan's visibility
@@ -360,11 +361,13 @@ Resolved since the first draft:
 - **Per-part privacy.** Privacy stays at the plan level — a booking is hidden as
   a whole or not at all. Hiding a single part (e.g. just the return leg) is
   treated as an unnecessary corner case.
+- **Passengers and viewing.** Adding someone as a passenger on a plan
+  automatically makes them a trip viewer — see §6.4.
 
 Still open:
 
-- When a passenger is added to a plan, should we offer to also add them as a trip
-  viewer? (Leaning yes, as an optional prompt.)
+- None at present — the design questions raised during review have all been
+  resolved above.
 
 ## 10. Possible future directions (not in this phase)
 
