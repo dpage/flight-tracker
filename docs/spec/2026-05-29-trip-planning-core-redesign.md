@@ -132,6 +132,7 @@ CREATE TABLE plan_parts (
     status        TEXT NOT NULL DEFAULT 'planned' -- planned|confirmed|cancelled
                     CHECK (status IN ('planned','confirmed','cancelled')),
     supersedes_id BIGINT REFERENCES plan_parts(id) ON DELETE SET NULL,
+    details       JSONB NOT NULL DEFAULT '{}',     -- type-specific extras (§3.2)
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -191,7 +192,37 @@ The `positions` table keeps its shape but its FK becomes `plan_part_id`
 referencing `plan_parts(id)` (see migration below). The `positions_flight_ts_idx`
 becomes `positions_part_ts_idx`.
 
-### 3.2 Migration of existing data (`0010` up)
+### 3.2 Per-type part details
+
+Only `flight` carries enough structured, behaviour-bearing state (live tracking,
+resolver throttle via `last_resolved_at`, three scheduled/estimated/actual time
+pairs, the rich status enum) to justify a dedicated satellite — `flight_details`
+above. The other launch types are well served by the **generic `plan_parts`
+columns** (a part is fundamentally a time range with a start place and an end
+place) plus a small typed **`details` JSON blob** on the part for the
+type-specific extras — avoiding a sprawl of mostly-empty tables. `details` is
+marshalled to/from a per-type Go struct in the store layer (validated in app
+code, keyed off `plans.type`; the DB just stores JSONB). `train` graduates to its
+own `train_details` satellite if and when live train tracking lands (PRD future;
+§12) — at which point it follows the `flight_details` pattern.
+
+How each launch type maps onto the spine:
+
+| Type | Generic `plan_parts` columns | `details` JSON keys |
+|------|------------------------------|---------------------|
+| **flight** | starts/ends = scheduled out/in; start/end label+coords = origin/dest | *(rich data in `flight_details`)*; `seat`, `cabin` optional |
+| **hotel** | starts = check-in, ends = check-out; start_label = property; coords = address | `room_type`, `guests`, `standard_checkin`, `standard_checkout`, `address`, `phone` |
+| **train** | starts/ends = depart/arrive; start/end label = stations | `operator`, `service_no`, `coach`, `seat`, `class`, `platform` |
+| **ground** | starts/ends = pickup/dropoff; start_label = pickup, end_label = dropoff | `provider`, `phone`, `vehicle`, `driver`, `pax` |
+| **dining** | starts = reservation time; start_label = venue + coords | `party_size`, `reservation_name`, `phone` |
+| **excursion** | starts/ends = activity window; start_label = meeting point | `provider`, `ticket_count`, `meeting_point` |
+
+`standard_checkin` / `standard_checkout` feed the smart-times calc (§10); when a
+confirmation doesn't state them, the 15:00 / 11:00 local defaults apply. The
+extractor (§6) returns these same per-type fields, and `planops.Commit` writes
+the generic columns plus either `details` or `flight_details` according to type.
+
+### 3.3 Migration of existing data (`0010` up)
 
 Per the PRD's "Imported flights" decision:
 
@@ -436,9 +467,9 @@ untouched. With no flanking flight, fall back to standard times.
 
 ## 11. Frontend
 
-Introduce **one** routing level (e.g. `react-router` or a minimal hash router —
-decision in §12) for trip-list ↔ trip-detail; keep everything below dialog-driven
-as today.
+Introduce **one** routing level using **`react-router`** (resolved) for
+trip-list ↔ trip-detail (and trip sub-tabs Timeline / Map); keep everything below
+dialog-driven as today.
 
 - **`TripList`** replaces the map as home: Upcoming / Happening now / Past
   groupings; "New trip" primary action (was "Add flight" in `AppShell.tsx`).
@@ -458,22 +489,28 @@ as today.
 
 ---
 
-## 12. Open questions / decisions for review
+## 12. Decisions and open questions
 
-- **Old `flight_shares` migration:** map to per-plan `only_visible_to` (preserve
-  scope) vs. trip viewer (simpler, over-shares the import bucket). Leaning
-  `only_visible_to`.
-- **Router choice:** add `react-router` (familiar, heavier) vs. a tiny hand
-  rolled hash/segment router (keeps the bundle lean, matches the current
-  no-dependency-routing ethos). Leaning minimal.
-- **Trackable-type abstraction now or later:** model `plan_parts` + `positions`
-  generically enough that a future `train_details` slots in (PRD future), or keep
-  it flight-shaped and generalize when train tracking is real. Leaning: generic
-  positions table now (cheap), train satellite later.
-- **`plan_visibility` mode uniformity:** enforce one mode per plan via a trigger
-  vs. store-layer invariant. Leaning store-layer.
-- **Email-ingest target trip:** auto-create vs. always ask. Leaning auto-create
-  a draft trip but require confirmation before parts persist.
+Resolved:
+
+- **Old `flight_shares` migration:** map to per-plan `only_visible_to` rows, so
+  the original per-flight share scope is preserved rather than over-sharing the
+  whole import bucket.
+- **Router:** use `react-router` for the single trip-list ↔ trip-detail routing
+  level (§11).
+- **Per-type schema:** one rich `flight_details` satellite; all other launch
+  types use the generic `plan_parts` columns + a typed `details` JSON blob; a
+  `train_details` satellite is added only when live train tracking is built
+  (§3.2). `positions` is modelled generically (keyed on `plan_part_id`) from the
+  start so that future satellite is cheap.
+
+Still open:
+
+- **`plan_visibility` mode uniformity:** enforce one mode per plan via a DB
+  trigger vs. a store-layer invariant. Leaning store-layer.
+- **Email-ingest target trip:** auto-create a draft trip vs. always ask which
+  trip. Leaning auto-create a draft but require confirmation before parts
+  persist.
 
 ---
 
