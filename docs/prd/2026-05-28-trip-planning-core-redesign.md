@@ -36,6 +36,8 @@ Everything in a trip is shown on a single **vertical timeline**, grouped by day.
   to manual entry.
 - Present a trip as a clean, day-by-day vertical timeline.
 - Let users share a trip with friends and plan collaboratively.
+- Let users subscribe to their plans from their own calendar app via read-only
+  iCal feeds, at the personal, per-trip, and per-tag level.
 - Keep the live flight tracker as a strong secondary feature, reachable both
   from a single flight and as a "who's converging" view before/during an event.
 
@@ -207,6 +209,29 @@ point — "tag it `pgconf-eu-26`" — without anyone having to host or manage an
 event.
 
 ---
+
+### 6.7 Subscribe from your own calendar (iCal)
+
+Aerly publishes read-only calendar feeds (iCal / ICS) that people can subscribe
+to from Apple Calendar, Google Calendar, Outlook, and the like, so their plans
+sit alongside the rest of their life and refresh automatically as plans change.
+Feeds come at three scopes:
+
+- **Personal** — everything across the trips on your Trips list, so your whole
+  travel schedule lives in your everyday calendar.
+- **Per-trip** — a single trip, handy for dropping one itinerary into a calendar.
+- **Per-tag (the gathering)** — all the plans across the tagged trips you can
+  see, so a group heading to the same place can put the combined schedule on one
+  calendar. This is the calendar counterpart of the tracker's "who's on their
+  way" view; since events aren't modelled as such, the tag is the unit here.
+
+Each feed is a private, unguessable link tied to the person who created it, and
+it shows exactly what that person is allowed to see in the app — the same sharing
+and per-plan privacy rules apply, so a plan hidden from someone never appears in
+their feed. A feed link can be regenerated to revoke the old one.
+
+Each plan becomes a calendar entry with its time (in local time), title,
+location, and confirmation details.
 
 ## 7. Key journeys
 
