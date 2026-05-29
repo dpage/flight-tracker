@@ -13,9 +13,10 @@ each other move across a map. This document proposes making **trip planning**
 the core of the product, with the **flight tracker becoming a secondary feature**
 used immediately before, during, and just after a trip.
 
-The shape we're aiming at is a modern replacement for the planning half of
-TripIt — a product that has been badly neglected — combined with the live
-tracking and social "who's on their way" experience Aerly already does well.
+The shape we're aiming at is a modern, well-maintained take on trip planning —
+the kind of itinerary organiser that has been badly neglected elsewhere —
+combined with the live tracking and social "who's on their way" experience Aerly
+already does well.
 
 A user creates a **trip**, optionally shares it with friends, and fills it with
 their travel plans: flights, hotels, trains, buses, taxis, day trips, dinners,
