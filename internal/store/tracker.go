@@ -387,9 +387,3 @@ func (s *Store) TaggedTripSpan(ctx context.Context, viewerID int64, tag string) 
 	}
 	return *minStart, *maxEnd, true, nil
 }
-
-// normalizeTag lowercases and trims a tag label for label_norm matching,
-// mirroring the trip_tags.label_norm convention (spec §3.1).
-func normalizeTag(tag string) string {
-	return strings.ToLower(strings.TrimSpace(tag))
-}
