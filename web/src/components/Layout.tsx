@@ -19,6 +19,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import BarChartIcon from '@mui/icons-material/BarChart';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import EmailIcon from '@mui/icons-material/EmailOutlined';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
@@ -37,6 +38,7 @@ import AlertPrefsDialog from './AlertPrefsDialog';
 import EmailsDialog from './EmailsDialog';
 import FriendsDialog from './FriendsDialog';
 import StatsDialog from './StatsDialog';
+import CalendarSubscribeDialog from './CalendarSubscribeDialog';
 
 /** The authenticated app chrome for the trip-planning redesign (spec §11).
  *
@@ -59,6 +61,7 @@ export default function Layout() {
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [alertPrefsOpen, setAlertPrefsOpen] = useState(false);
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
 
   const closeMenu = () => setMenuAnchor(null);
@@ -195,6 +198,17 @@ export default function Layout() {
               </ListItemIcon>
               Alert preferences…
             </MenuItem>
+            <MenuItem
+              onClick={() => {
+                closeMenu();
+                setSubscribeOpen(true);
+              }}
+            >
+              <ListItemIcon>
+                <CalendarMonthIcon fontSize="small" />
+              </ListItemIcon>
+              Subscribe to calendar…
+            </MenuItem>
             <Divider />
             <MenuItem disabled sx={{ opacity: '1 !important' }}>
               <Typography variant="caption" color="text.secondary">
@@ -248,6 +262,11 @@ export default function Layout() {
       <FriendsDialog open={friendsOpen} onClose={() => setFriendsOpen(false)} />
       <StatsDialog open={statsOpen} onClose={() => setStatsOpen(false)} />
       <AlertPrefsDialog open={alertPrefsOpen} onClose={() => setAlertPrefsOpen(false)} />
+      <CalendarSubscribeDialog
+        open={subscribeOpen}
+        onClose={() => setSubscribeOpen(false)}
+        scope="me"
+      />
     </Box>
   );
 }
