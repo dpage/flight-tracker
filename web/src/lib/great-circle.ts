@@ -48,7 +48,7 @@ function splitOnAntimeridian(coords: LatLon[]): LatLon[] {
       const prev = coords[i - 1];
       const cur = coords[i];
       if (Math.abs(cur[0] - prev[0]) > 180) {
-        // Mark a discontinuity by inserting NaN; FlightMap converts to MultiLineString.
+        // Mark a discontinuity by inserting NaN; callers convert to MultiLineString.
         out.push([NaN, NaN]);
       }
     }

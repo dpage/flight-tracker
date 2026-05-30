@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { Capabilities, PlanPart, ProposedPlan, Trip } from '../api/types';
 
 // Drive the DateTimePicker through a plain controlled input so the manual
-// form's dates are deterministic (same shim the FlightDialog test uses).
+// form's dates are deterministic.
 vi.mock('@mui/x-date-pickers/DateTimePicker', () => ({
   DateTimePicker: ({
     label,

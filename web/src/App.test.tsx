@@ -6,8 +6,9 @@ const h = vi.hoisted(() => {
   return {
     connectSSE: vi.fn(
       (_handlers: {
-        onFlight: (f: unknown) => void;
-        onDelete: (id: number) => void;
+        onPlanPart: (p: unknown) => void;
+        onTrip?: (id: number) => void;
+        onPlan?: (tripId: number) => void;
         onNotifications: (n: unknown) => void;
       }) => vi.fn(),
     ),
@@ -18,15 +19,16 @@ const h = vi.hoisted(() => {
       auth: 'loading' as 'loading' | 'anonymous' | 'authenticated',
       error: null as string | null,
       notice: null as { message: string; severity: 'success' | 'info' } | null,
+      currentTrip: null as { id: number } | null,
       init: vi.fn(),
       setError: vi.fn(),
       setNotice: vi.fn(),
       refreshNotifications: vi.fn(),
       refreshFriendships: vi.fn(),
       refreshUsers: vi.fn(),
-      refreshFlights: vi.fn(),
-      applyFlightUpdate: vi.fn(),
-      applyFlightDelete: vi.fn(),
+      applyPlanPartUpdate: vi.fn(),
+      loadTrip: vi.fn(),
+      loadTracker: vi.fn(),
       applyNotificationsUpdate: vi.fn(),
       users: [] as Array<{ id: number; name: string }>,
     },
@@ -37,7 +39,6 @@ const state = h.state;
 
 vi.mock('./sse', () => ({ connectSSE: h.connectSSE }));
 vi.mock('./api/client', () => ({ api: h.api, ApiError: class {} }));
-vi.mock('./components/AppShell', () => ({ default: () => <div>APP_SHELL</div> }));
 // The authenticated `/` route renders Layout → TripList. Mock the chrome to a
 // plain Outlet so the routed page shows through, and stub the pages.
 vi.mock('./components/Layout', async () => {
@@ -59,9 +60,12 @@ vi.mock('./pages/Tracker', () => ({ default: () => <div>TRACKER</div> }));
 vi.mock('./components/Login', () => ({ default: () => <div>LOGIN</div> }));
 vi.mock('./components/PrivacyPolicy', () => ({ default: () => <div>PRIVACY_POLICY</div> }));
 vi.mock('./components/TermsOfService', () => ({ default: () => <div>TERMS_OF_SERVICE</div> }));
-vi.mock('./state/store', () => ({
-  useStore: (sel: (s: typeof h.state) => unknown) => sel(h.state),
-}));
+vi.mock('./state/store', () => {
+  const useStore = (sel: (s: typeof h.state) => unknown) => sel(h.state);
+  // App's defensive onTrip/onPlan SSE handlers read useStore.getState().
+  useStore.getState = () => h.state;
+  return { useStore };
+});
 
 import App from './App';
 
@@ -94,23 +98,36 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByText('TRIP_LIST')).toBeInTheDocument();
     expect(connectSSE).toHaveBeenCalledTimes(1);
-    // All three SSE handlers should forward to the matching store action.
     const handlers = connectSSE.mock.calls[0][0];
-    handlers.onFlight({ id: 7 });
-    expect(state.applyFlightUpdate).toHaveBeenCalledWith({ id: 7 });
-    handlers.onDelete(7);
-    expect(state.applyFlightDelete).toHaveBeenCalledWith(7);
+    // plan_part.updated → applyPlanPartUpdate folds the live part into the
+    // tracker list and the open trip's timeline.
+    handlers.onPlanPart({ plan_part_id: 7 });
+    expect(state.applyPlanPartUpdate).toHaveBeenCalledWith({ plan_part_id: 7 });
     handlers.onNotifications({ friend_requests_pending: 2 });
     expect(state.applyNotificationsUpdate).toHaveBeenCalledWith({ friend_requests_pending: 2 });
     // notifications.updated fires on any friendship state change for the
     // viewer — the friend list and the cached user records have to be
     // refreshed so newly-accepted friends show up in the share/passenger
-    // pickers and the friends dialog (instead of "User #N"). Flights too:
-    // unfriending makes the peer's "Share with all friends" flights
-    // invisible, and we want the local list to drop them immediately.
+    // pickers and the friends dialog (instead of "User #N").
     expect(state.refreshFriendships).toHaveBeenCalled();
     expect(state.refreshUsers).toHaveBeenCalled();
-    expect(state.refreshFlights).toHaveBeenCalled();
+  });
+
+  it('defensive onTrip/onPlan refetch only the open trip (backend does not emit these yet)', () => {
+    state.auth = 'authenticated';
+    state.currentTrip = { id: 5 };
+    render(<App />);
+    const handlers = connectSSE.mock.calls[0][0];
+    // A matching trip id refetches; a non-matching one is ignored.
+    handlers.onTrip!(5);
+    expect(state.loadTrip).toHaveBeenCalledWith(5);
+    state.loadTrip.mockClear();
+    handlers.onTrip!(99);
+    expect(state.loadTrip).not.toHaveBeenCalled();
+    // onPlan refetches the open trip when it matches, and always the tracker.
+    handlers.onPlan!(5);
+    expect(state.loadTrip).toHaveBeenCalledWith(5);
+    expect(state.loadTracker).toHaveBeenCalled();
   });
 
   it('renders the success-notice snackbar and clears it via the close button', async () => {
@@ -171,7 +188,7 @@ describe('App', () => {
     state.auth = 'authenticated';
     render(<App />);
     expect(screen.getByText('PRIVACY_POLICY')).toBeInTheDocument();
-    expect(screen.queryByText('APP_SHELL')).not.toBeInTheDocument();
+    expect(screen.queryByText('TRIP_LIST')).not.toBeInTheDocument();
   });
 
   it('renders TermsOfService at /terms even when authenticated', () => {
@@ -179,7 +196,7 @@ describe('App', () => {
     state.auth = 'authenticated';
     render(<App />);
     expect(screen.getByText('TERMS_OF_SERVICE')).toBeInTheDocument();
-    expect(screen.queryByText('APP_SHELL')).not.toBeInTheDocument();
+    expect(screen.queryByText('TRIP_LIST')).not.toBeInTheDocument();
   });
 
   it('Snackbar onClose fires setError(null) on autohide timeout', async () => {

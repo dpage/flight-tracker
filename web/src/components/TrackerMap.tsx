@@ -35,9 +35,9 @@ interface TrackerMapProps {
  * as a single live map, no ranking. When `focusedPartId` is set the view fits
  * to that one part (the single-flight focus opened from a timeline card).
  *
- * Mirrors FlightMap's MapLibre lifecycle (init once, sync markers on data
- * change, fit bounds) but works off the lighter `TrackerPart` shape, which only
- * carries a latest position. */
+ * Uses the standard MapLibre lifecycle (init once, sync markers on data
+ * change, fit bounds) over the lighter `TrackerPart` shape, which only carries
+ * a latest position. */
 export default function TrackerMap({ parts, focusedPartId }: TrackerMapProps) {
   const containerRef = useRef<HTMLElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);

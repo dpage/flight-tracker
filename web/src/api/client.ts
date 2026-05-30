@@ -7,7 +7,6 @@ import type {
   CalendarToken,
   Capabilities,
   ConfirmPlanInput,
-  CreateFlightInput,
   CreatePlanInput,
   CreateTripInput,
   Flight,
@@ -27,7 +26,6 @@ import type {
   TrackerPart,
   Trip,
   UpdateAlertPrefsInput,
-  UpdateFlightInput,
   UpdatePlanInput,
   UpdatePlanPartInput,
   UpdateTripInput,
@@ -123,6 +121,11 @@ export const api = {
     }
   },
 
+  // The legacy single-flight collection routes were retired in the trip-planning
+  // cut-over. Two pieces survive:
+  //   - listFlights backs the Statistics dialog's flown/upcoming rollup.
+  //   - resolveFlight backs the manual flight-add (ident + date → metadata).
+  // The backend keeps exactly these two routes.
   listFlights: (opts?: { showAll?: boolean; showOld?: boolean }) => {
     const params = new URLSearchParams();
     if (opts?.showAll) params.set('show_all', '1');
@@ -130,21 +133,8 @@ export const api = {
     const qs = params.toString();
     return request<Flight[]>('GET', qs ? `/api/flights?${qs}` : '/api/flights');
   },
-  getFlight: (id: number) => request<Flight>('GET', `/api/flights/${id}`),
-  createFlight: (input: CreateFlightInput) => request<Flight>('POST', '/api/flights', input),
   resolveFlight: (input: ResolveFlightInput) =>
     request<ResolvedFlight>('POST', '/api/flights/resolve', input),
-  updateFlight: (id: number, patch: UpdateFlightInput) =>
-    request<Flight>('PATCH', `/api/flights/${id}`, patch),
-  deleteFlight: (id: number) => request<void>('DELETE', `/api/flights/${id}`),
-  addPassenger: (flightId: number, userId: number) =>
-    request<void>('POST', `/api/flights/${flightId}/passengers`, { user_id: userId }),
-  removePassenger: (flightId: number, userId: number) =>
-    request<void>('DELETE', `/api/flights/${flightId}/passengers/${userId}`),
-  addShare: (flightId: number, userId: number) =>
-    request<void>('POST', `/api/flights/${flightId}/shares`, { user_id: userId }),
-  removeShare: (flightId: number, userId: number) =>
-    request<void>('DELETE', `/api/flights/${flightId}/shares/${userId}`),
 
   listUsers: () => request<User[]>('GET', '/api/users'),
   inviteUser: (input: InviteUserInput) => request<User>('POST', '/api/users', input),
