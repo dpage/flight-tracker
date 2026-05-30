@@ -11,6 +11,7 @@ func TestFlightAlertSubject(t *testing.T) {
 		"delayed":   "Your flight BA123 is now delayed",
 		"cancelled": "Your flight BA123 has been cancelled",
 		"diverted":  "Your flight BA123 has been diverted",
+		"gate":      "Gate change: BA123",
 		"":          "Your flight BA123 is now delayed", // unknown kind → delayed
 	}
 	for kind, want := range cases {
@@ -58,5 +59,21 @@ func TestBuildFlightAlertEmail_CancellationNoDetail(t *testing.T) {
 	})
 	if !strings.Contains(msg, "Your flight LH9 has been cancelled") {
 		t.Errorf("cancellation headline missing:\n%s", msg)
+	}
+}
+
+func TestBuildFlightAlertEmail_GateChange(t *testing.T) {
+	msg := BuildFlightAlertEmail(FlightAlertInput{
+		FromAddr:  "a@x",
+		ToAddr:    "b@x",
+		PublicURL: "http://localhost:8080",
+		Ident:     "BA286",
+		Kind:      "gate",
+		Detail:    "now departs gate B32",
+	})
+	for _, want := range []string{"Gate change: BA286", "now departs gate B32"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("gate-change email missing %q:\n%s", want, msg)
+		}
 	}
 }

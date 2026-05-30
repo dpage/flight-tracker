@@ -293,6 +293,33 @@ func TestParseADBTime(t *testing.T) {
 	}
 }
 
+// AeroDataBox returns gate + terminal on the departure/arrival movement for
+// many airports; the resolver must surface them (trimmed). Absent fields → "".
+func TestAeroDataBoxCarriesGateAndTerminal(t *testing.T) {
+	body := `[{"number":"BA 286","codeshareStatus":"IsOperator",
+	  "departure":{"airport":{"iata":"LHR"},"scheduledTime":{"utc":"2026-05-19 08:30Z"},"gate":" B32 ","terminal":"5"},
+	  "arrival":{"airport":{"iata":"SFO"},"scheduledTime":{"utc":"2026-05-19T19:45Z"},"gate":"A12"}}]`
+	a := newADB(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	})
+	rf, err := a.Resolve(context.Background(), "BA286", time.Now())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if rf.OriginGate != "B32" {
+		t.Errorf("origin gate = %q, want B32 (trimmed)", rf.OriginGate)
+	}
+	if rf.DestGate != "A12" {
+		t.Errorf("dest gate = %q, want A12", rf.DestGate)
+	}
+	if rf.OriginTerminal != "5" {
+		t.Errorf("origin terminal = %q, want 5", rf.OriginTerminal)
+	}
+	if rf.DestTerminal != "" {
+		t.Errorf("dest terminal = %q, want empty (absent)", rf.DestTerminal)
+	}
+}
+
 func TestBuildResolvedNilSubObjects(t *testing.T) {
 	f := &adbFlight{Number: "AA1"}
 	r := buildResolved(f, "FALLBACK")
@@ -321,7 +348,7 @@ func TestIdentVariants(t *testing.T) {
 		// because they were a real driver of 429 bursts on tighter plans.
 		{"BA87", []string{"BA87", "BA0087"}},
 		{"BA087", []string{"BA087", "BA0087"}},
-		{"BA0087", []string{"BA0087"}},        // already canonical → single try
+		{"BA0087", []string{"BA0087"}}, // already canonical → single try
 		{"BA00087", []string{"BA00087", "BA0087"}},
 
 		// Airline codes can include digits ("9W" = Jet Airways). The regex

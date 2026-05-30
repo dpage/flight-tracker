@@ -334,6 +334,10 @@ func buildResolved(f *adbFlight, fallbackIdent string) *ResolvedFlight {
 			r.DestLon = a.Location.Lon
 		}
 	}
+	r.OriginGate = strings.TrimSpace(f.Departure.Gate)
+	r.DestGate = strings.TrimSpace(f.Arrival.Gate)
+	r.OriginTerminal = strings.TrimSpace(f.Departure.Terminal)
+	r.DestTerminal = strings.TrimSpace(f.Arrival.Terminal)
 	if f.Aircraft != nil {
 		r.ICAO24 = strings.ToLower(strings.TrimSpace(f.Aircraft.ModeS))
 	}
@@ -384,6 +388,10 @@ type adbFlight struct {
 type adbMovement struct {
 	Airport       adbAirport `json:"airport"`
 	ScheduledTime *adbTime   `json:"scheduledTime,omitempty"`
+	// Gate / terminal are present on the departure/arrival movement for many
+	// airports; absent for others (omitempty → "").
+	Gate     string `json:"gate,omitempty"`
+	Terminal string `json:"terminal,omitempty"`
 }
 
 type adbTime struct {

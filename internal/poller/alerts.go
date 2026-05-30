@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/dpage/aerly/internal/api"
@@ -23,10 +24,13 @@ import (
 //   - a departure delay (effective_out - scheduled_out) that grows by at least
 //     the recipient's alert_prefs.min_delay_min threshold alerts.
 //
-// There is no gate column in flight_details (the schema never modelled gate),
-// so gate-change detection from the spec is not implementable here without a
-// schema addition; status + delay cover the cancellation/diversion/delay cases
-// the PRD calls out as always-alert / threshold-gated.
+// Gate changes (README follow-up / AeroDataBox precursor): migration 0014 added
+// origin_gate/dest_gate to flight_details, the resolver now surfaces them, and
+// the poller persists the live value each tick. When a part's origin_gate or
+// dest_gate changes to a NEW non-empty value we always-alert (like
+// cancellation; not threshold-gated). The gate is folded into the dedupe
+// signature so the same gate isn't re-alerted on the next tick. Terminal is
+// captured (origin_terminal/dest_terminal) but not alerted on.
 
 // delaySigBucketMin is the granularity at which a delay is folded into the
 // dedupe signature. Two polls reporting the same delay (to the minute) produce
@@ -41,10 +45,12 @@ type alertState struct {
 	delayMin   int  // departure delay = effective_out - scheduled_out, clamped >= 0
 	hasDelay   bool // false when there's no estimated/actual departure yet
 	terminalDV bool // status is Cancelled or Diverted
+	originGate string
+	destGate   string
 }
 
 func snapshot(f *store.Flight) alertState {
-	st := alertState{status: f.Status}
+	st := alertState{status: f.Status, originGate: f.OriginGate, destGate: f.DestGate}
 	st.terminalDV = f.Status == "Cancelled" || f.Status == "Diverted"
 	eff := effectiveOut(f)
 	if eff != nil {
@@ -72,15 +78,25 @@ func effectiveOut(f *store.Flight) *time.Time {
 
 // alertSignature is the per-part dedupe key for a state. Cancellation/diversion
 // key on status alone; a delay keys on the bucketed delay so the same delay
-// isn't re-sent, but a deeper delay produces a new signature and re-alerts.
+// isn't re-sent, but a deeper delay produces a new signature and re-alerts. The
+// gate is always folded in (a change to a new gate produces a new signature and
+// so re-alerts, while the same gate value dedupes). Components are joined so a
+// part that both slips and changes gate carries both in its signature.
 func alertSignature(st alertState) string {
-	if st.terminalDV {
-		return "status:" + st.status
+	var parts []string
+	switch {
+	case st.terminalDV:
+		parts = append(parts, "status:"+st.status)
+	case st.hasDelay:
+		parts = append(parts, fmt.Sprintf("delay:%d", (st.delayMin/delaySigBucketMin)*delaySigBucketMin))
 	}
-	if st.hasDelay {
-		return fmt.Sprintf("delay:%d", (st.delayMin/delaySigBucketMin)*delaySigBucketMin)
+	if st.originGate != "" {
+		parts = append(parts, "ogate:"+st.originGate)
 	}
-	return ""
+	if st.destGate != "" {
+		parts = append(parts, "dgate:"+st.destGate)
+	}
+	return strings.Join(parts, "|")
 }
 
 // maybeAlert is invoked by refresh after the part's flight_details have been
@@ -126,7 +142,7 @@ func (p *Poller) maybeAlert(ctx context.Context, prev *store.Flight, partID int6
 		return
 	}
 
-	detail := changeDetail(kind, cur)
+	detail := changeDetail(kind, prevSt, curSt, cur)
 	p.dispatchAlert(ctx, tp, cur, kind, detail, curSt, recips)
 
 	// Stamp the dedupe signature only after we've attempted delivery so a mid-
@@ -148,6 +164,13 @@ func changeKind(prev, cur alertState) string {
 	if cur.status == "Diverted" && prev.status != "Diverted" {
 		return "diverted"
 	}
+	// Gate change: a departure or arrival gate that became a NEW non-empty
+	// value. Always-alert (like cancellation), ahead of a delay so a flight
+	// that both slips and re-gates leads with the actionable gate. A gate going
+	// empty (provider dropped the field) is not a change worth alerting.
+	if gateChanged(prev.originGate, cur.originGate) || gateChanged(prev.destGate, cur.destGate) {
+		return "gate"
+	}
 	// Delay: a (deeper) departure delay. We treat any increase in the measured
 	// delay as a candidate; the min_delay_min threshold is applied per
 	// recipient so a 5-minute slip below everyone's threshold is suppressed
@@ -158,17 +181,32 @@ func changeKind(prev, cur alertState) string {
 	return ""
 }
 
+// gateChanged reports whether cur is a new, non-empty gate distinct from prev.
+// An unchanged gate, or a gate that disappeared (cur == ""), is not a change.
+func gateChanged(prev, cur string) bool {
+	return cur != "" && cur != prev
+}
+
 // changeDetail builds the human phrase appended to the headline. For a delay it
-// names the new effective departure; cancellation/diversion stand alone.
-func changeDetail(kind string, cur *store.Flight) string {
+// names the new effective departure; for a gate change it names the new gate
+// (departure preferred when both moved); cancellation/diversion stand alone.
+func changeDetail(kind string, prev, cur alertState, f *store.Flight) string {
 	switch kind {
 	case "delayed":
-		if eff := effectiveOut(cur); eff != nil {
+		if eff := effectiveOut(f); eff != nil {
 			return "now departing " + eff.UTC().Format("15:04 MST")
 		}
 		return "now delayed"
 	case "diverted":
 		return "diverted to a different airport"
+	case "gate":
+		if gateChanged(prev.originGate, cur.originGate) {
+			return "now departs gate " + cur.originGate
+		}
+		if gateChanged(prev.destGate, cur.destGate) {
+			return "now arrives at gate " + cur.destGate
+		}
+		return "gate changed"
 	default:
 		return ""
 	}
@@ -196,7 +234,7 @@ func (p *Poller) dispatchAlert(
 	recips []store.AlertRecipient,
 ) {
 	msg := alertMessage(cur.Ident, kind, detail)
-	always := kind == "cancelled" || kind == "diverted"
+	always := kind == "cancelled" || kind == "diverted" || kind == "gate"
 
 	for _, r := range recips {
 		// Threshold filter for delays only; cancellations/diversions always

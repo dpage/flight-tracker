@@ -93,6 +93,43 @@ func TestFlightPartWriteHelpers(t *testing.T) {
 	if f.LastResolvedAt == nil {
 		t.Error("RefreshFlightPartAirframe should bump last_resolved_at")
 	}
+
+	// Terminal is backfilled only-fill-empty; gate is captured via the
+	// dedicated overwrite-when-non-empty writer.
+	if err := s.BackfillFlightPart(ctx, part, BackfillPayload{
+		OriginTerminal: "5", DestTerminal: "I",
+	}); err != nil {
+		t.Fatalf("BackfillFlightPart terminal: %v", err)
+	}
+	if err := s.RefreshFlightPartGate(ctx, part, "B32", "A12"); err != nil {
+		t.Fatalf("RefreshFlightPartGate: %v", err)
+	}
+	f, _ = s.FlightPartByID(ctx, part)
+	if f.OriginTerminal != "5" || f.DestTerminal != "I" {
+		t.Errorf("terminal not captured: %q/%q", f.OriginTerminal, f.DestTerminal)
+	}
+	if f.OriginGate != "B32" || f.DestGate != "A12" {
+		t.Errorf("gate not captured: %q/%q", f.OriginGate, f.DestGate)
+	}
+
+	// Terminal is only-fill-empty: a second backfill must NOT overwrite it.
+	if err := s.BackfillFlightPart(ctx, part, BackfillPayload{OriginTerminal: "2"}); err != nil {
+		t.Fatalf("BackfillFlightPart terminal again: %v", err)
+	}
+	// Gate IS updatable: a non-empty value overwrites; an empty value preserves.
+	if err := s.RefreshFlightPartGate(ctx, part, "B40", ""); err != nil {
+		t.Fatalf("RefreshFlightPartGate update: %v", err)
+	}
+	f, _ = s.FlightPartByID(ctx, part)
+	if f.OriginTerminal != "5" {
+		t.Errorf("terminal should be only-fill-empty, got %q", f.OriginTerminal)
+	}
+	if f.OriginGate != "B40" {
+		t.Errorf("gate should be overwritten to B40, got %q", f.OriginGate)
+	}
+	if f.DestGate != "A12" {
+		t.Errorf("empty gate should preserve existing A12, got %q", f.DestGate)
+	}
 }
 
 // TestConvergenceWindowAndVisibility: the convergence query respects the §4

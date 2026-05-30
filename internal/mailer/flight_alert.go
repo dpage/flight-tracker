@@ -8,16 +8,17 @@ import (
 )
 
 // FlightAlertInput is the data needed to render a flight-change alert email
-// (spec §9). Kind selects the headline ("delayed" / "cancelled" / "diverted");
-// When is the new effective time for a delay (zero for cancellations, which
-// have no meaningful new time). Detail is a short human phrase describing the
-// change, e.g. "now departing 14:35" or "to a different airport".
+// (spec §9). Kind selects the headline ("delayed" / "cancelled" / "diverted" /
+// "gate"); When is the new effective time for a delay (zero for cancellations,
+// which have no meaningful new time). Detail is a short human phrase describing
+// the change, e.g. "now departing 14:35", "to a different airport", or
+// "now departs gate B32".
 type FlightAlertInput struct {
 	FromAddr  string
 	ToAddr    string
 	PublicURL string
 	Ident     string    // flight ident, e.g. "BA123"
-	Kind      string    // delayed|cancelled|diverted
+	Kind      string    // delayed|cancelled|diverted|gate
 	Detail    string    // ready-to-render change phrase
 	When      time.Time // new effective time for delays; zero otherwise
 }
@@ -30,6 +31,10 @@ func FlightAlertSubject(ident, kind string) string {
 		return fmt.Sprintf("Your flight %s has been cancelled", ident)
 	case "diverted":
 		return fmt.Sprintf("Your flight %s has been diverted", ident)
+	case "gate":
+		// Lead with "Gate change" so the notification preview is actionable,
+		// e.g. "Gate change: BA286" + " — now departs gate B32".
+		return fmt.Sprintf("Gate change: %s", ident)
 	default:
 		return fmt.Sprintf("Your flight %s is now delayed", ident)
 	}
