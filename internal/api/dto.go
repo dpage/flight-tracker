@@ -141,16 +141,16 @@ type FlightDTO struct {
 	// embedded airports table; empty when the IATA is unknown. The
 	// frontend uses them to render scheduled times in airport-local
 	// time on both ends of the trip.
-	OriginTZ     string       `json:"origin_tz,omitempty"`
-	DestIATA     string       `json:"dest_iata"`
-	DestLat      *float64     `json:"dest_lat,omitempty"`
-	DestLon      *float64     `json:"dest_lon,omitempty"`
-	DestTZ       string       `json:"dest_tz,omitempty"`
-	Status       string       `json:"status"`
-	Notes        string       `json:"notes"`
-	LastPolledAt *time.Time   `json:"last_polled_at,omitempty"`
-	CreatedBy    *int64       `json:"created_by,omitempty"`
-	PassengerIDs []int64      `json:"passenger_ids"`
+	OriginTZ     string     `json:"origin_tz,omitempty"`
+	DestIATA     string     `json:"dest_iata"`
+	DestLat      *float64   `json:"dest_lat,omitempty"`
+	DestLon      *float64   `json:"dest_lon,omitempty"`
+	DestTZ       string     `json:"dest_tz,omitempty"`
+	Status       string     `json:"status"`
+	Notes        string     `json:"notes"`
+	LastPolledAt *time.Time `json:"last_polled_at,omitempty"`
+	CreatedBy    *int64     `json:"created_by,omitempty"`
+	PassengerIDs []int64    `json:"passenger_ids"`
 	// IsPublic flips the flight to "visible to every authenticated user".
 	IsPublic bool `json:"is_public"`
 	// SharedUserIDs lists explicit share-list members. Always non-nil
@@ -222,4 +222,368 @@ func ToFlightDTO(
 // with omitempty, so older clients ignoring them keep working.
 type NotificationsDTO struct {
 	FriendRequestsPending int `json:"friend_requests_pending"`
+}
+
+// =====================================================================
+// Trip-planning DTOs (LOCKED CONTRACT — shared verbatim with the frontend
+// agent). Field names/types must not drift; see the Wave 0a contract in
+// docs/plan/2026-05-29-trip-planning-implementation-plan.md §4.
+// =====================================================================
+
+// TripDTO is one trip with the viewer's role, members, and tags. Dates are
+// "YYYY-MM-DD" strings (nullable); the effective span is derived client-side
+// from the plans' parts when these are null.
+type TripDTO struct {
+	ID          int64           `json:"id"`
+	Name        string          `json:"name"`
+	Destination string          `json:"destination"`
+	StartsOn    *string         `json:"starts_on,omitempty"` // YYYY-MM-DD
+	EndsOn      *string         `json:"ends_on,omitempty"`
+	CreatedBy   *int64          `json:"created_by,omitempty"`
+	MyRole      string          `json:"my_role"` // owner|editor|viewer
+	Members     []TripMemberDTO `json:"members"`
+	Tags        []string        `json:"tags"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+// TripMemberDTO is one membership edge.
+type TripMemberDTO struct {
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"` // owner|editor|viewer
+}
+
+// PlanDTO is a booking with its parts and per-plan visibility. passenger_ids
+// is always non-nil.
+type PlanDTO struct {
+	ID              int64             `json:"id"`
+	TripID          int64             `json:"trip_id"`
+	Type            string            `json:"type"`
+	Title           string            `json:"title"`
+	ConfirmationRef string            `json:"confirmation_ref"`
+	Notes           string            `json:"notes"`
+	Source          string            `json:"source"`
+	CreatedBy       *int64            `json:"created_by,omitempty"`
+	PassengerIDs    []int64           `json:"passenger_ids"`
+	Visibility      PlanVisibilityDTO `json:"visibility"`
+	Parts           []PlanPartDTO     `json:"parts"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+}
+
+// PlanVisibilityDTO carries the per-plan privacy mode and named users.
+// mode is "everyone" when no override row exists; user_ids is always non-nil.
+type PlanVisibilityDTO struct {
+	Mode    string  `json:"mode"` // everyone|hidden_from|only_visible_to
+	UserIDs []int64 `json:"user_ids"`
+}
+
+// PlanPartDTO is one timeline entry. Exactly one of the typed detail pointers
+// is populated, selected by Type. effective_at = COALESCE(actual, estimated,
+// scheduled) so the front end sorts every type uniformly.
+type PlanPartDTO struct {
+	ID           int64               `json:"id"`
+	PlanID       int64               `json:"plan_id"`
+	Type         string              `json:"type"`
+	Seq          int                 `json:"seq"`
+	StartsAt     time.Time           `json:"starts_at"`
+	EndsAt       *time.Time          `json:"ends_at,omitempty"`
+	StartTZ      string              `json:"start_tz"`
+	EndTZ        string              `json:"end_tz"`
+	StartLabel   string              `json:"start_label"`
+	StartLat     *float64            `json:"start_lat,omitempty"`
+	StartLon     *float64            `json:"start_lon,omitempty"`
+	EndLabel     string              `json:"end_label"`
+	EndLat       *float64            `json:"end_lat,omitempty"`
+	EndLon       *float64            `json:"end_lon,omitempty"`
+	Status       string              `json:"status"`
+	EffectiveAt  time.Time           `json:"effective_at"`
+	SupersedesID *int64              `json:"supersedes_id,omitempty"`
+	DismissedAt  *time.Time          `json:"dismissed_at,omitempty"`
+	Flight       *FlightDetailDTO    `json:"flight,omitempty"`
+	Hotel        *HotelDetailDTO     `json:"hotel,omitempty"`
+	Train        *TrainDetailDTO     `json:"train,omitempty"`
+	Ground       *GroundDetailDTO    `json:"ground,omitempty"`
+	Dining       *DiningDetailDTO    `json:"dining,omitempty"`
+	Excursion    *ExcursionDetailDTO `json:"excursion,omitempty"`
+}
+
+// FlightDetailDTO is the flight-type satellite payload, including tracker
+// positions.
+type FlightDetailDTO struct {
+	Ident          string        `json:"ident"`
+	ICAO24         *string       `json:"icao24,omitempty"`
+	Callsign       string        `json:"callsign"`
+	ScheduledOut   time.Time     `json:"scheduled_out"`
+	ScheduledIn    time.Time     `json:"scheduled_in"`
+	EstimatedOut   *time.Time    `json:"estimated_out,omitempty"`
+	EstimatedIn    *time.Time    `json:"estimated_in,omitempty"`
+	ActualOut      *time.Time    `json:"actual_out,omitempty"`
+	ActualIn       *time.Time    `json:"actual_in,omitempty"`
+	OriginIATA     string        `json:"origin_iata"`
+	DestIATA       string        `json:"dest_iata"`
+	FlightStatus   string        `json:"flight_status"`
+	LastPolledAt   *time.Time    `json:"last_polled_at,omitempty"`
+	LatestPosition *PositionDTO  `json:"latest_position,omitempty"`
+	Track          []PositionDTO `json:"track,omitempty"`
+}
+
+// HotelDetailDTO is the hotel-type satellite payload. standard_checkin/out are
+// "HH:MM" local; checkin_suggested/checkout_suggested are the derived smart
+// times (§10), nil when not computed.
+type HotelDetailDTO struct {
+	PropertyName      string     `json:"property_name"`
+	Address           string     `json:"address"`
+	Phone             string     `json:"phone"`
+	RoomType          string     `json:"room_type"`
+	Guests            *int       `json:"guests,omitempty"`
+	StandardCheckin   *string    `json:"standard_checkin,omitempty"` // HH:MM
+	StandardCheckout  *string    `json:"standard_checkout,omitempty"`
+	CheckinSuggested  *time.Time `json:"checkin_suggested,omitempty"`
+	CheckoutSuggested *time.Time `json:"checkout_suggested,omitempty"`
+}
+
+// TrainDetailDTO is the train-type satellite payload.
+type TrainDetailDTO struct {
+	Operator  string `json:"operator"`
+	ServiceNo string `json:"service_no"`
+	Coach     string `json:"coach"`
+	Seat      string `json:"seat"`
+	Class     string `json:"class"`
+	Platform  string `json:"platform"`
+}
+
+// GroundDetailDTO is the ground-transport satellite payload.
+type GroundDetailDTO struct {
+	Provider string `json:"provider"`
+	Phone    string `json:"phone"`
+	Vehicle  string `json:"vehicle"`
+	Driver   string `json:"driver"`
+	Pax      *int   `json:"pax,omitempty"`
+}
+
+// DiningDetailDTO is the dining-reservation satellite payload.
+type DiningDetailDTO struct {
+	PartySize       *int   `json:"party_size,omitempty"`
+	ReservationName string `json:"reservation_name"`
+	Phone           string `json:"phone"`
+}
+
+// ExcursionDetailDTO is the excursion/activity satellite payload.
+type ExcursionDetailDTO struct {
+	Provider    string `json:"provider"`
+	TicketCount *int   `json:"ticket_count,omitempty"`
+}
+
+// TrackerPartDTO is the convergence-view payload: a labelled trackable part
+// with its latest position, flattened across plans/trips.
+type TrackerPartDTO struct {
+	PlanPartID     int64        `json:"plan_part_id"`
+	PlanID         int64        `json:"plan_id"`
+	TripID         int64        `json:"trip_id"`
+	OwnerID        *int64       `json:"owner_id,omitempty"`
+	Title          string       `json:"title"`
+	Status         string       `json:"status"`
+	EffectiveAt    time.Time    `json:"effective_at"`
+	Ident          string       `json:"ident"`
+	DestIATA       string       `json:"dest_iata"`
+	LatestPosition *PositionDTO `json:"latest_position,omitempty"`
+}
+
+// TagSuggestionDTO is one autocomplete entry for GET /api/tags/suggest.
+type TagSuggestionDTO struct {
+	Label string `json:"label"`
+}
+
+// ToTripDTO renders a trip with the viewer's role, members, and tags. The
+// caller supplies myRole, members, and tags (already gathered) so the DTO
+// stays a pure projection. Wave 1A wires the gathering in handlers_trips.go.
+func ToTripDTO(t *store.Trip, myRole string, members []TripMemberDTO, tags []string) TripDTO {
+	if members == nil {
+		members = []TripMemberDTO{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	dto := TripDTO{
+		ID:          t.ID,
+		Name:        t.Name,
+		Destination: t.Destination,
+		CreatedBy:   t.CreatedBy,
+		MyRole:      myRole,
+		Members:     members,
+		Tags:        tags,
+		CreatedAt:   t.CreatedAt,
+		UpdatedAt:   t.UpdatedAt,
+	}
+	if t.StartsOn != nil {
+		s := t.StartsOn.Format("2006-01-02")
+		dto.StartsOn = &s
+	}
+	if t.EndsOn != nil {
+		s := t.EndsOn.Format("2006-01-02")
+		dto.EndsOn = &s
+	}
+	return dto
+}
+
+// ToTripMemberDTO projects a membership row.
+func ToTripMemberDTO(m *store.TripMember) TripMemberDTO {
+	return TripMemberDTO{UserID: m.UserID, Role: m.Role}
+}
+
+// ToPlanPartDTO renders a part with its type-specific detail. The detail is
+// passed in (already loaded by the store) as exactly one non-nil pointer; the
+// TZ-lookup convenience that lived in ToFlightDTO now happens here, filling
+// start_tz/end_tz from the airports table when the part left them blank.
+//
+// effective_at = COALESCE(actual, estimated, scheduled): for flight parts it
+// uses the detail's effective departure; for every other type it is StartsAt.
+func ToPlanPartDTO(
+	p *store.PlanPart,
+	flight *store.FlightDetail,
+	hotel *store.HotelDetail,
+	train *store.TrainDetail,
+	ground *store.GroundDetail,
+	dining *store.DiningDetail,
+	excursion *store.ExcursionDetail,
+	latest *store.Position,
+	track []*store.Position,
+) PlanPartDTO {
+	startTZ, endTZ := p.StartTZ, p.EndTZ
+	dto := PlanPartDTO{
+		ID:           p.ID,
+		PlanID:       p.PlanID,
+		Type:         p.Type,
+		Seq:          p.Seq,
+		StartsAt:     p.StartsAt,
+		EndsAt:       p.EndsAt,
+		StartLabel:   p.StartLabel,
+		StartLat:     p.StartLat,
+		StartLon:     p.StartLon,
+		EndLabel:     p.EndLabel,
+		EndLat:       p.EndLat,
+		EndLon:       p.EndLon,
+		Status:       p.Status,
+		EffectiveAt:  p.EffectiveAt(),
+		SupersedesID: p.SupersedesID,
+		DismissedAt:  p.DismissedAt,
+	}
+	switch {
+	case flight != nil:
+		// Fall back to airport TZ when the part didn't store one.
+		if startTZ == "" {
+			if tz, ok := airports.LookupTZ(flight.OriginIATA); ok {
+				startTZ = tz
+			}
+		}
+		if endTZ == "" {
+			if tz, ok := airports.LookupTZ(flight.DestIATA); ok {
+				endTZ = tz
+			}
+		}
+		dto.Flight = ToFlightDetailDTO(flight, latest, track)
+		dto.EffectiveAt = flight.EffectiveOut()
+	case hotel != nil:
+		dto.Hotel = ToHotelDetailDTO(hotel)
+	case train != nil:
+		dto.Train = ToTrainDetailDTO(train)
+	case ground != nil:
+		dto.Ground = ToGroundDetailDTO(ground)
+	case dining != nil:
+		dto.Dining = ToDiningDetailDTO(dining)
+	case excursion != nil:
+		dto.Excursion = ToExcursionDetailDTO(excursion)
+	}
+	dto.StartTZ = startTZ
+	dto.EndTZ = endTZ
+	return dto
+}
+
+// ToFlightDetailDTO mirrors the old ToFlightDTO position handling.
+func ToFlightDetailDTO(d *store.FlightDetail, latest *store.Position, track []*store.Position) *FlightDetailDTO {
+	callsign := ""
+	if d.Callsign != nil {
+		callsign = *d.Callsign
+	}
+	out := &FlightDetailDTO{
+		Ident:        d.Ident,
+		ICAO24:       d.ICAO24,
+		Callsign:     callsign,
+		ScheduledOut: d.ScheduledOut,
+		ScheduledIn:  d.ScheduledIn,
+		EstimatedOut: d.EstimatedOut,
+		EstimatedIn:  d.EstimatedIn,
+		ActualOut:    d.ActualOut,
+		ActualIn:     d.ActualIn,
+		OriginIATA:   d.OriginIATA,
+		DestIATA:     d.DestIATA,
+		FlightStatus: d.FlightStatus,
+		LastPolledAt: d.LastPolledAt,
+	}
+	if latest != nil {
+		pp := ToPositionDTO(latest)
+		out.LatestPosition = &pp
+	}
+	if len(track) > 0 {
+		out.Track = make([]PositionDTO, len(track))
+		for i, p := range track {
+			out.Track[i] = ToPositionDTO(p)
+		}
+	}
+	return out
+}
+
+// ToHotelDetailDTO projects a hotel satellite. Suggested smart times are left
+// nil here; Wave 1E computes and sets them at assembly time.
+func ToHotelDetailDTO(d *store.HotelDetail) *HotelDetailDTO {
+	return &HotelDetailDTO{
+		PropertyName:     d.PropertyName,
+		Address:          d.Address,
+		Phone:            d.Phone,
+		RoomType:         d.RoomType,
+		Guests:           d.Guests,
+		StandardCheckin:  d.StandardCheckin,
+		StandardCheckout: d.StandardCheckout,
+	}
+}
+
+// ToTrainDetailDTO projects a train satellite.
+func ToTrainDetailDTO(d *store.TrainDetail) *TrainDetailDTO {
+	return &TrainDetailDTO{
+		Operator:  d.Operator,
+		ServiceNo: d.ServiceNo,
+		Coach:     d.Coach,
+		Seat:      d.Seat,
+		Class:     d.Class,
+		Platform:  d.Platform,
+	}
+}
+
+// ToGroundDetailDTO projects a ground satellite.
+func ToGroundDetailDTO(d *store.GroundDetail) *GroundDetailDTO {
+	return &GroundDetailDTO{
+		Provider: d.Provider,
+		Phone:    d.Phone,
+		Vehicle:  d.Vehicle,
+		Driver:   d.Driver,
+		Pax:      d.Pax,
+	}
+}
+
+// ToDiningDetailDTO projects a dining satellite.
+func ToDiningDetailDTO(d *store.DiningDetail) *DiningDetailDTO {
+	return &DiningDetailDTO{
+		PartySize:       d.PartySize,
+		ReservationName: d.ReservationName,
+		Phone:           d.Phone,
+	}
+}
+
+// ToExcursionDetailDTO projects an excursion satellite.
+func ToExcursionDetailDTO(d *store.ExcursionDetail) *ExcursionDetailDTO {
+	return &ExcursionDetailDTO{
+		Provider:    d.Provider,
+		TicketCount: d.TicketCount,
+	}
 }

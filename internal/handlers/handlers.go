@@ -82,6 +82,55 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/users", sup(http.HandlerFunc(a.inviteUser)))
 	mux.Handle("PATCH /api/users/{id}", sup(http.HandlerFunc(a.updateUser)))
 	mux.Handle("DELETE /api/users/{id}", sup(http.HandlerFunc(a.deleteUser)))
+
+	// --- Trip-planning core redesign (spec §5.2). Bodies are filled in by
+	// the Wave 1/2 feature agents in their per-area handler files. ---
+
+	// Trips, members, tags (Wave 1A).
+	mux.Handle("GET /api/trips", req(http.HandlerFunc(a.listTrips)))
+	mux.Handle("POST /api/trips", req(http.HandlerFunc(a.createTrip)))
+	mux.Handle("GET /api/trips/{id}", req(http.HandlerFunc(a.getTrip)))
+	mux.Handle("PATCH /api/trips/{id}", req(http.HandlerFunc(a.updateTrip)))
+	mux.Handle("DELETE /api/trips/{id}", req(http.HandlerFunc(a.deleteTrip)))
+	mux.Handle("POST /api/trips/{id}/members", req(http.HandlerFunc(a.addTripMember)))
+	mux.Handle("DELETE /api/trips/{id}/members/{userId}", req(http.HandlerFunc(a.removeTripMember)))
+	mux.Handle("PUT /api/trips/{id}/tags", req(http.HandlerFunc(a.setTripTags)))
+	mux.Handle("GET /api/tags/suggest", req(http.HandlerFunc(a.suggestTags)))
+
+	// Plans, parts, passengers, visibility, move (Wave 1B).
+	mux.Handle("POST /api/trips/{id}/plans", req(http.HandlerFunc(a.createPlan)))
+	mux.Handle("PATCH /api/plans/{id}", req(http.HandlerFunc(a.updatePlan)))
+	mux.Handle("DELETE /api/plans/{id}", req(http.HandlerFunc(a.deletePlan)))
+	mux.Handle("POST /api/plans/{id}/passengers", req(http.HandlerFunc(a.addPlanPassenger)))
+	mux.Handle("DELETE /api/plans/{id}/passengers/{userId}", req(http.HandlerFunc(a.removePlanPassenger)))
+	mux.Handle("PUT /api/plans/{id}/visibility", req(http.HandlerFunc(a.setPlanVisibility)))
+	mux.Handle("POST /api/plans/{id}/move", req(http.HandlerFunc(a.movePlan)))
+	mux.Handle("PATCH /api/plan-parts/{id}", req(http.HandlerFunc(a.updatePlanPart)))
+	mux.Handle("POST /api/plan-parts/{id}/dismiss", req(http.HandlerFunc(a.dismissPlanPart)))
+
+	// Ingest (Wave 2A).
+	mux.Handle("POST /api/trips/{id}/ingest", req(http.HandlerFunc(a.ingestTrip)))
+	mux.Handle("POST /api/trips/{id}/ingest/confirm", req(http.HandlerFunc(a.ingestTripConfirm)))
+
+	// iCal feeds (Wave 1D). Token-authed via ?token=, NOT the session cookie,
+	// so they are registered without the req() session guard.
+	//
+	// Go 1.22 ServeMux can't express a wildcard that doesn't span a whole path
+	// segment (e.g. "{id}.ics"), so the trip/plan feeds are registered as
+	// prefix patterns and the handler parses the trailing "{id}.ics". The
+	// public URLs stay exactly /api/calendar/{trip,plan}/{id}.ics.
+	mux.Handle("GET /api/calendar/me.ics", http.HandlerFunc(a.calendarMe))
+	mux.Handle("GET /api/calendar/trip/", http.HandlerFunc(a.calendarTrip))
+	mux.Handle("GET /api/calendar/plan/", http.HandlerFunc(a.calendarPlan))
+
+	// Tracker (Wave 1C).
+	mux.Handle("GET /api/tracker", req(http.HandlerFunc(a.getTracker)))
+
+	// Alerts (Wave 2B).
+	mux.Handle("GET /api/alert-prefs", req(http.HandlerFunc(a.getAlertPrefs)))
+	mux.Handle("PUT /api/alert-prefs", req(http.HandlerFunc(a.setAlertPrefs)))
+	mux.Handle("POST /api/plans/{id}/alerts/optin", req(http.HandlerFunc(a.addPlanAlertOptin)))
+	mux.Handle("DELETE /api/plans/{id}/alerts/optin", req(http.HandlerFunc(a.removePlanAlertOptin)))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
