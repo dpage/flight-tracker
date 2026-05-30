@@ -121,6 +121,11 @@ func run() error {
 	// fresh AeroDataBox state (last_resolved_at handles throttling). Falls
 	// back to the cached one when no upstream is configured (i.e. nil).
 	p.Resolver = rawResolver
+	// Flight-alert email config (spec §9). Empty MailFromAddress disables the
+	// email channel; in-app alerts still publish over the hub.
+	p.MailFromAddress = cfg.MailFromAddress
+	p.SendmailPath = cfg.SendmailPath
+	p.PublicURL = cfg.PublicURL
 	go p.Run(rootCtx)
 
 	if cfg.EmailIngestEnabled {

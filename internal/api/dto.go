@@ -222,6 +222,23 @@ func ToFlightDTO(
 // with omitempty, so older clients ignoring them keep working.
 type NotificationsDTO struct {
 	FriendRequestsPending int `json:"friend_requests_pending"`
+	// Alert is set only on the alert.created SSE event the poller publishes
+	// when a tracked flight changes meaningfully (spec §9). It is omitted on
+	// the GET /api/notifications body and on friend-count updates.
+	Alert *FlightAlertDTO `json:"alert,omitempty"`
+}
+
+// FlightAlertDTO is the in-app flight-change alert payload carried on the
+// alert.created SSE event. Kind is the change class ("delayed", "cancelled",
+// "diverted"); Message is a ready-to-display one-liner.
+type FlightAlertDTO struct {
+	PlanPartID int64  `json:"plan_part_id"`
+	PlanID     int64  `json:"plan_id"`
+	TripID     int64  `json:"trip_id"`
+	Ident      string `json:"ident"`
+	Kind       string `json:"kind"` // delayed|cancelled|diverted
+	Status     string `json:"status"`
+	Message    string `json:"message"`
 }
 
 // =====================================================================

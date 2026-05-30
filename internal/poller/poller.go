@@ -23,6 +23,26 @@ type Poller struct {
 	Resolver providers.Resolver // optional; when set, backfills missing metadata
 	Hub      *sse.Hub
 	Interval time.Duration
+
+	// Email-alert config (spec §9). When MailFromAddress is empty the email
+	// channel is skipped (in-app alerts still fire). SendAlertEmail defaults
+	// to mailer.Send; tests override it to capture messages.
+	MailFromAddress string
+	SendmailPath    string
+	PublicURL       string
+	SendAlertEmail  func(ctx context.Context, sendmailPath, envelopeSender, message string) error
+}
+
+// sseAlertEvent builds the user-private alert.created SSE event for a single
+// recipient. UserPrivate keeps a superuser show-all subscription from seeing
+// another user's alert (same rule as notifications.updated).
+func sseAlertEvent(userID int64, payload []byte) sse.Event {
+	return sse.Event{
+		Type:        "alert.created",
+		Data:        payload,
+		VisibleTo:   []int64{userID},
+		UserPrivate: true,
+	}
 }
 
 func New(s *store.Store, t providers.Tracker, hub *sse.Hub, interval time.Duration) *Poller {
@@ -116,11 +136,19 @@ func (p *Poller) refresh(ctx context.Context, f *store.Flight, now time.Time) {
 			slog.Error("poller: insert position", "id", f.ID, "err", err)
 		}
 	}
+	// Snapshot the pre-refresh state so the alert step can diff against the
+	// post-refresh flight_details (f is the carrier as loaded this tick,
+	// possibly after a resolver backfill above).
+	prev := f
 	// Always refresh the status from the schedule; preserves Cancelled /
 	// Diverted, otherwise derives Scheduled / Enroute / Arrived from times.
 	if err := p.Store.RefreshFlightPartStatus(ctx, f.ID); err != nil {
 		slog.Error("poller: refresh status", "id", f.ID, "err", err)
 	}
+
+	// Flight-alert diff step (spec §9): detect a meaningful status/time change
+	// and fan out in-app + email alerts to the recipient set, deduped per part.
+	p.maybeAlert(ctx, prev, f.ID)
 
 	p.publishPartChange(ctx, f.ID)
 }
