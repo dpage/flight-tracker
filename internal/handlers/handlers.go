@@ -123,6 +123,12 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/calendar/trip/", http.HandlerFunc(a.calendarTrip))
 	mux.Handle("GET /api/calendar/plan/", http.HandlerFunc(a.calendarPlan))
 
+	// Calendar token management (Wave 1D) — session-authed, matching the FE
+	// contract in web/src/api/client.ts (list/issue/revoke per-scope tokens).
+	mux.Handle("GET /api/calendar/tokens", req(http.HandlerFunc(a.listCalendarTokens)))
+	mux.Handle("POST /api/calendar/tokens", req(http.HandlerFunc(a.issueCalendarToken)))
+	mux.Handle("DELETE /api/calendar/tokens/{token}", req(http.HandlerFunc(a.revokeCalendarToken)))
+
 	// Tracker (Wave 1C).
 	mux.Handle("GET /api/tracker", req(http.HandlerFunc(a.getTracker)))
 
