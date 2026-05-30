@@ -21,6 +21,7 @@ export class FakeMap {
     this.controls.push(ctrl);
   });
   fitBounds = vi.fn();
+  flyTo = vi.fn();
   remove = vi.fn();
 
   constructor(opts: unknown) {
