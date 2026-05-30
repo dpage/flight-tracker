@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +49,17 @@ func setStatus(t *testing.T, s *store.Store, partID int64, status string) {
 		`UPDATE flight_details SET flight_status = $2 WHERE plan_part_id = $1`,
 		partID, status); err != nil {
 		t.Fatalf("set status: %v", err)
+	}
+}
+
+// setOriginGate writes the departure gate on the part's flight_details,
+// simulating what RefreshFlightPartGate persists when the provider reports it.
+func setOriginGate(t *testing.T, s *store.Store, partID int64, gate string) {
+	t.Helper()
+	if _, err := s.Pool().Exec(context.Background(),
+		`UPDATE flight_details SET origin_gate = $2 WHERE plan_part_id = $1`,
+		partID, gate); err != nil {
+		t.Fatalf("set origin_gate: %v", err)
 	}
 }
 
@@ -291,5 +303,98 @@ func TestAlert_DedupeSuppressesRepeatOfSameChange(t *testing.T) {
 	}
 	if cap.count() != 1 {
 		t.Fatalf("repeat delay: expected still 1 email, got %d", cap.count())
+	}
+}
+
+func TestAlert_GateChangeAlwaysAlertsRegardlessOfThreshold(t *testing.T) {
+	p, s, hub, cap := alertPoller(t)
+	ctx := context.Background()
+	owner := seedUser(t, s)
+	if err := s.UpsertVerifiedEmail(ctx, owner, "owner@aerly.test"); err != nil {
+		t.Fatalf("verify email: %v", err)
+	}
+	// Crank the delay threshold way up: a gate change must still alert.
+	if err := s.SetAlertPrefs(ctx, store.AlertPrefs{UserID: owner, InApp: true, Email: true, MinDelayMin: 600}); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+	now := time.Now()
+	f, err := mkPart(ctx, s, partSeed{
+		Ident: "BA286", ScheduledOut: now.Add(time.Hour), ScheduledIn: now.Add(3 * time.Hour),
+		OriginIATA: "LHR", DestIATA: "SFO",
+	}, owner)
+	if err != nil {
+		t.Fatalf("mkPart: %v", err)
+	}
+	ch, unsub := hub.Subscribe(sse.Subscription{ViewerID: owner})
+	defer unsub()
+
+	prev := f // no gate yet
+	setOriginGate(t, s, f.ID, "B32")
+	p.maybeAlert(ctx, prev, f.ID)
+
+	got := drainAlerts(t, ch)
+	if len(got) != 1 || got[0].Kind != "gate" {
+		t.Fatalf("expected 1 gate alert, got %+v", got)
+	}
+	if !strings.Contains(got[0].Message, "B32") || !strings.Contains(got[0].Message, "Gate change") {
+		t.Fatalf("gate message missing detail: %q", got[0].Message)
+	}
+	if cap.count() != 1 {
+		t.Fatalf("expected 1 gate-change email, got %d", cap.count())
+	}
+}
+
+func TestAlert_SameGateDoesNotReAlert(t *testing.T) {
+	p, s, hub, cap := alertPoller(t)
+	ctx := context.Background()
+	owner := seedUser(t, s)
+	if err := s.UpsertVerifiedEmail(ctx, owner, "owner@aerly.test"); err != nil {
+		t.Fatalf("verify email: %v", err)
+	}
+	now := time.Now()
+	f, err := mkPart(ctx, s, partSeed{
+		Ident: "BA286", ScheduledOut: now.Add(time.Hour), ScheduledIn: now.Add(3 * time.Hour),
+		OriginIATA: "LHR", DestIATA: "SFO",
+	}, owner)
+	if err != nil {
+		t.Fatalf("mkPart: %v", err)
+	}
+	ch, unsub := hub.Subscribe(sse.Subscription{ViewerID: owner})
+	defer unsub()
+
+	// First tick: gate assigned → alert.
+	prev := f
+	setOriginGate(t, s, f.ID, "B32")
+	p.maybeAlert(ctx, prev, f.ID)
+	if got := drainAlerts(t, ch); len(got) != 1 {
+		t.Fatalf("first gate: expected 1 alert, got %d", len(got))
+	}
+	if cap.count() != 1 {
+		t.Fatalf("first gate: expected 1 email, got %d", cap.count())
+	}
+
+	// Second tick: gate unchanged (still B32). Dedupe signature unchanged →
+	// no re-alert.
+	prev2, err := s.FlightPartByID(ctx, f.ID)
+	if err != nil {
+		t.Fatalf("refetch: %v", err)
+	}
+	p.maybeAlert(ctx, prev2, f.ID)
+	if got := drainAlerts(t, ch); len(got) != 0 {
+		t.Fatalf("same gate: expected no re-alert, got %d", len(got))
+	}
+	if cap.count() != 1 {
+		t.Fatalf("same gate: expected still 1 email, got %d", cap.count())
+	}
+
+	// Third tick: gate moves to a NEW value → alerts again.
+	prev3, err := s.FlightPartByID(ctx, f.ID)
+	if err != nil {
+		t.Fatalf("refetch: %v", err)
+	}
+	setOriginGate(t, s, f.ID, "B40")
+	p.maybeAlert(ctx, prev3, f.ID)
+	if got := drainAlerts(t, ch); len(got) != 1 || got[0].Kind != "gate" {
+		t.Fatalf("new gate: expected 1 gate re-alert, got %+v", got)
 	}
 }

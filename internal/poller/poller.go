@@ -258,13 +258,21 @@ func (p *Poller) resolveAndUpdate(ctx context.Context, f *store.Flight, now time
 		OriginIATA: rf.OriginIATA, OriginLat: rf.OriginLat, OriginLon: rf.OriginLon,
 		DestIATA: rf.DestIATA, DestLat: rf.DestLat, DestLon: rf.DestLon,
 		ICAO24: rf.ICAO24, Callsign: rf.Callsign,
-		Notes: rf.Notes,
+		Notes:          rf.Notes,
+		OriginTerminal: rf.OriginTerminal, DestTerminal: rf.DestTerminal,
 	}); err != nil {
 		slog.Error("poller: backfill write failed", "id", f.ID, "err", err)
 		return nil, err
 	}
 	if err := p.Store.RefreshFlightPartAirframe(ctx, f.ID, rf.ICAO24, rf.Callsign); err != nil {
 		slog.Error("poller: refresh airframe failed", "id", f.ID, "err", err)
+		return nil, err
+	}
+	// Gate is updatable (a change is what the gate-change alert detects), so it
+	// goes through the overwrite-when-non-empty path rather than the
+	// only-fill-empty backfill above.
+	if err := p.Store.RefreshFlightPartGate(ctx, f.ID, rf.OriginGate, rf.DestGate); err != nil {
+		slog.Error("poller: refresh gate failed", "id", f.ID, "err", err)
 		return nil, err
 	}
 	slog.Info("poller: resolved",

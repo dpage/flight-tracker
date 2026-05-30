@@ -71,6 +71,14 @@ type Flight struct {
 	LastResolvedAt *time.Time
 	CreatedBy      *int64
 	Notes          string
+	// Gate / terminal as last resolved from the airline-data provider. Gate is
+	// UPDATABLE (it changes; a change to a new non-empty value drives a
+	// gate-change alert); terminal is only-fill-empty backfilled metadata.
+	// Empty string when unknown / not yet resolved.
+	OriginGate     string
+	DestGate       string
+	OriginTerminal string
+	DestTerminal   string
 	// IsPublic makes the flight visible to every authenticated user,
 	// independent of the creator / passenger / share-list membership.
 	IsPublic  bool

@@ -96,6 +96,7 @@ func (p *Poller) sweepOne(ctx context.Context, f *store.Flight, now time.Time) {
 			}
 			update.ICAO24, update.Callsign = rf.ICAO24, rf.Callsign
 			update.Notes = rf.Notes
+			update.OriginTerminal, update.DestTerminal = rf.OriginTerminal, rf.DestTerminal
 			changed = true
 		} else {
 			slog.Warn("sweep: resolve failed", "ident", f.Ident, "id", f.ID, "err", rerr)

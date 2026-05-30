@@ -34,7 +34,10 @@ const flightPartColumns = `part.id, fd.ident, fd.scheduled_out, fd.scheduled_in,
 	fd.origin_iata, part.start_lat, part.start_lon,
 	fd.dest_iata, part.end_lat, part.end_lon,
 	fd.flight_status, fd.icao24, fd.callsign, fd.last_polled_at, fd.last_resolved_at,
-	pl.created_by, pl.notes, FALSE,
+	pl.created_by, pl.notes,
+	COALESCE(fd.origin_gate, ''), COALESCE(fd.dest_gate, ''),
+	COALESCE(fd.origin_terminal, ''), COALESCE(fd.dest_terminal, ''),
+	FALSE,
 	part.created_at, part.updated_at`
 
 const flightPartFrom = `FROM plan_parts part
@@ -53,7 +56,9 @@ func scanFlightPart(row pgx.Row) (*Flight, error) {
 		&f.OriginIATA, &f.OriginLat, &f.OriginLon,
 		&f.DestIATA, &f.DestLat, &f.DestLon,
 		&f.Status, &f.ICAO24, &f.Callsign, &f.LastPolledAt, &f.LastResolvedAt,
-		&f.CreatedBy, &f.Notes, &f.IsPublic,
+		&f.CreatedBy, &f.Notes,
+		&f.OriginGate, &f.DestGate, &f.OriginTerminal, &f.DestTerminal,
+		&f.IsPublic,
 		&f.CreatedAt, &f.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -139,6 +144,11 @@ type BackfillPayload struct {
 	ICAO24     string
 	Callsign   string
 	Notes      string
+	// Terminal is backfilled only-fill-empty like the airframe fields (it
+	// rarely changes for a leg). Gate is NOT here — it changes and so is
+	// written via RefreshFlightPartGate (overwrite-when-non-empty).
+	OriginTerminal string
+	DestTerminal   string
 }
 
 // BackfillFlightPart writes resolver-supplied metadata only into columns that
@@ -164,13 +174,16 @@ func (s *Store) BackfillFlightPart(ctx context.Context, partID int64, in Backfil
 	// flight_details: IATA + airframe (only-fill-empty), mirroring BackfillFlight.
 	if _, err := tx.Exec(ctx, `
 		UPDATE flight_details SET
-			origin_iata = CASE WHEN origin_iata = '' AND $2 <> '' THEN $2 ELSE origin_iata END,
-			dest_iata   = CASE WHEN dest_iata = '' AND $3 <> '' THEN $3 ELSE dest_iata END,
-			icao24      = COALESCE(icao24, NULLIF($4, '')),
-			callsign    = COALESCE(callsign, NULLIF($5, ''))
+			origin_iata     = CASE WHEN origin_iata = '' AND $2 <> '' THEN $2 ELSE origin_iata END,
+			dest_iata       = CASE WHEN dest_iata = '' AND $3 <> '' THEN $3 ELSE dest_iata END,
+			icao24          = COALESCE(icao24, NULLIF($4, '')),
+			callsign        = COALESCE(callsign, NULLIF($5, '')),
+			origin_terminal = COALESCE(origin_terminal, NULLIF($6, '')),
+			dest_terminal   = COALESCE(dest_terminal, NULLIF($7, ''))
 		WHERE plan_part_id = $1`,
 		partID, strings.ToUpper(in.OriginIATA), strings.ToUpper(in.DestIATA),
-		icao24, callsign); err != nil {
+		icao24, callsign,
+		strings.TrimSpace(in.OriginTerminal), strings.TrimSpace(in.DestTerminal)); err != nil {
 		return err
 	}
 
@@ -212,6 +225,23 @@ func (s *Store) RefreshFlightPartAirframe(ctx context.Context, partID int64, ica
 			callsign         = COALESCE(NULLIF($3, ''), callsign),
 			last_resolved_at = NOW()
 		WHERE plan_part_id = $1`, partID, icao24, callsign)
+	return err
+}
+
+// RefreshFlightPartGate overwrites the departure/arrival gate when the supplied
+// value is non-empty (empty preserves the existing column — the provider often
+// omits gate before it's assigned, and an omission must not wipe a known gate).
+// Unlike terminal (backfilled only-fill-empty), gate is UPDATABLE because a
+// gate CHANGE is precisely what the gate-change alert detects; the poller reads
+// the pre-refresh gate from the carrier, calls this, then diffs.
+func (s *Store) RefreshFlightPartGate(ctx context.Context, partID int64, originGate, destGate string) error {
+	originGate = strings.TrimSpace(originGate)
+	destGate = strings.TrimSpace(destGate)
+	_, err := s.pool.Exec(ctx, `
+		UPDATE flight_details SET
+			origin_gate = COALESCE(NULLIF($2, ''), origin_gate),
+			dest_gate   = COALESCE(NULLIF($3, ''), dest_gate)
+		WHERE plan_part_id = $1`, partID, originGate, destGate)
 	return err
 }
 

@@ -61,6 +61,14 @@ type ResolvedFlight struct {
 	ICAO24       string // 24-bit Mode-S hex address (lowercase) when known
 	Callsign     string // ICAO radio callsign (e.g. "DLH493"); empty when not yet assigned
 	Notes        string // free-text summary — typically airline + aircraft model
+	// Gate / terminal as reported on the departure/arrival movement. Many
+	// airports populate these; absent → empty string. Gate changes are what
+	// the gate-change alert detects, so the resolver surfaces the live value
+	// on every resolve (not just first-fill).
+	OriginGate     string
+	DestGate       string
+	OriginTerminal string
+	DestTerminal   string
 }
 
 // Resolver maps a flight number + departure date to a ResolvedFlight. The
