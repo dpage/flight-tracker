@@ -3,9 +3,13 @@ package poller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/dpage/aerly/internal/airports"
 	"github.com/dpage/aerly/internal/providers"
 	"github.com/dpage/aerly/internal/sse"
 	"github.com/dpage/aerly/internal/store"
@@ -42,11 +46,83 @@ func newPoller(t *testing.T, tr *mockTracker, interval time.Duration) (*Poller, 
 
 func seedUser(t *testing.T, s *store.Store) int64 {
 	t.Helper()
-	u, err := s.InviteUser(context.Background(), store.InvitePayload{Username: "po", Name: "po"})
+	u, err := s.InviteUser(context.Background(),
+		store.InvitePayload{Username: fmt.Sprintf("po%d", seedSeq.Add(1)), Name: "po"})
 	if err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	return u.ID
+}
+
+var seedSeq atomic.Int64
+
+// mkPart seeds a trip + flight plan + plan_part + flight_details from the same
+// CreateFlightPayload shape the legacy CreateFlight took, and returns the
+// flight carrier keyed on the plan_part_id — the unit the re-keyed poller now
+// works against. It mirrors CreateFlight's create-time behaviour: coords are
+// looked up from the airports table, status is derived from the schedule, and
+// the ident is normalised. Returns the same (*store.Flight, error) signature so
+// the test bodies read like the old s.CreateFlight calls.
+func mkPart(ctx context.Context, s *store.Store, in store.CreateFlightPayload, createdBy int64) (*store.Flight, error) {
+	n := seedSeq.Add(1)
+	var tripID int64
+	if err := s.Pool().QueryRow(ctx,
+		`INSERT INTO trips (name, created_by) VALUES ($1, $2) RETURNING id`,
+		fmt.Sprintf("trip%d", n), createdBy).Scan(&tripID); err != nil {
+		return nil, err
+	}
+	if _, err := s.Pool().Exec(ctx,
+		`INSERT INTO trip_members (trip_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		tripID, createdBy); err != nil {
+		return nil, err
+	}
+	var planID int64
+	if err := s.Pool().QueryRow(ctx,
+		`INSERT INTO plans (trip_id, type, notes, created_by) VALUES ($1, 'flight', $2, $3) RETURNING id`,
+		tripID, in.Notes, createdBy).Scan(&planID); err != nil {
+		return nil, err
+	}
+	ident := strings.ToUpper(strings.Join(strings.Fields(in.Ident), ""))
+	originIATA := strings.ToUpper(in.OriginIATA)
+	destIATA := strings.ToUpper(in.DestIATA)
+	var oLat, oLon, dLat, dLon *float64
+	if lat, lon, ok := airports.Lookup(originIATA); ok {
+		oLat, oLon = &lat, &lon
+	}
+	if lat, lon, ok := airports.Lookup(destIATA); ok {
+		dLat, dLon = &lat, &lon
+	}
+	var partID int64
+	if err := s.Pool().QueryRow(ctx, `
+		INSERT INTO plan_parts (plan_id, starts_at, ends_at, start_lat, start_lon, end_lat, end_lon, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed') RETURNING id`,
+		planID, in.ScheduledOut, in.ScheduledIn, oLat, oLon, dLat, dLon).Scan(&partID); err != nil {
+		return nil, err
+	}
+	var icao24 *string
+	if v := strings.ToLower(strings.TrimSpace(in.ICAO24)); v != "" {
+		icao24 = &v
+	}
+	if _, err := s.Pool().Exec(ctx, `
+		INSERT INTO flight_details (plan_part_id, ident, icao24, scheduled_out, scheduled_in,
+			origin_iata, dest_iata, flight_status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			CASE
+				WHEN NOW() > $5 THEN 'Arrived'
+				WHEN NOW() >= $4 THEN 'Enroute'
+				ELSE 'Scheduled'
+			END)`,
+		partID, ident, icao24, in.ScheduledOut, in.ScheduledIn, originIATA, destIATA); err != nil {
+		return nil, err
+	}
+	return s.FlightPartByID(ctx, partID)
+}
+
+// deletePart removes a flight plan_part (cascading its flight_details /
+// positions), used by the "tracker deletes the row mid-poll" test.
+func deletePart(ctx context.Context, s *store.Store, partID int64) error {
+	_, err := s.Pool().Exec(ctx, `DELETE FROM plan_parts WHERE id = $1`, partID)
+	return err
 }
 
 func TestNewDefaultsInterval(t *testing.T) {
@@ -78,7 +154,7 @@ func TestTickInsertsPositionRefreshesAndPublishes(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, err := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, err := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "PL1", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)
@@ -94,17 +170,17 @@ func TestTickInsertsPositionRefreshesAndPublishes(t *testing.T) {
 	if tr.calls != 1 {
 		t.Errorf("tracker calls = %d, want 1", tr.calls)
 	}
-	pos, _ := s.LatestPositions(ctx, []int64{f.ID})
+	pos, _ := s.LatestPartPositions(ctx, []int64{f.ID})
 	if pos[f.ID] == nil {
 		t.Error("expected a position to be inserted")
 	}
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.LastPolledAt == nil {
 		t.Error("RefreshFlightStatus should set last_polled_at")
 	}
 	select {
 	case ev := <-events:
-		if ev.Type != "flight.updated" {
+		if ev.Type != "plan_part.updated" {
 			t.Errorf("event type = %q", ev.Type)
 		}
 	case <-time.After(time.Second):
@@ -118,18 +194,18 @@ func TestTickTrackerErrorStillRefreshes(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "PL2", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)
 
 	p.tick(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.LastPolledAt == nil {
 		t.Error("status should still be refreshed despite tracker error")
 	}
-	if pos, _ := s.LatestPositions(ctx, []int64{f.ID}); pos[f.ID] != nil {
+	if pos, _ := s.LatestPartPositions(ctx, []int64{f.ID}); pos[f.ID] != nil {
 		t.Error("no position should be inserted when tracker errors")
 	}
 }
@@ -140,12 +216,12 @@ func TestTickSkipsFreshlyPolled(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "PL3", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)
 	// Mark as just polled so minPollAge skips it.
-	if err := s.RefreshFlightStatus(ctx, f.ID); err != nil {
+	if err := s.RefreshFlightPartStatus(ctx, f.ID); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
 
@@ -171,7 +247,7 @@ func TestTickContextCancelledMidLoop(t *testing.T) {
 	p, s, _ := newPoller(t, tr, time.Minute)
 	uid := seedUser(t, s)
 	now := time.Now()
-	_, _ = s.CreateFlight(context.Background(), store.CreateFlightPayload{
+	_, _ = mkPart(context.Background(), s, store.CreateFlightPayload{
 		Ident: "PL4", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)
@@ -197,12 +273,12 @@ func TestRefreshHandlesDeletedFlight(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "DELME", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)
 	tr.before = func(fl *store.Flight) {
-		if err := s.DeleteFlight(ctx, fl.ID); err != nil {
+		if err := deletePart(ctx, s, fl.ID); err != nil {
 			t.Fatalf("delete in tracker: %v", err)
 		}
 	}
@@ -211,7 +287,7 @@ func TestRefreshHandlesDeletedFlight(t *testing.T) {
 
 	p.tick(ctx) // must not panic; FlightByID after delete → error → return
 
-	if _, err := s.FlightByID(ctx, f.ID); err == nil {
+	if _, err := s.FlightPartByID(ctx, f.ID); err == nil {
 		t.Error("flight should have been deleted by the tracker hook")
 	}
 	select {
@@ -230,7 +306,7 @@ func TestTickContextCancelledBetweenFlights(t *testing.T) {
 	uid := seedUser(t, s)
 	now := time.Now()
 	for _, id := range []string{"AA1", "BB2"} {
-		_, _ = s.CreateFlight(context.Background(), store.CreateFlightPayload{
+		_, _ = mkPart(context.Background(), s, store.CreateFlightPayload{
 			Ident: id, ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 			OriginIATA: "LHR", DestIATA: "JFK",
 		}, uid)
@@ -276,7 +352,7 @@ func TestRefreshBackfillsMissingMetadata(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, err := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, err := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident:        "BA286",
 		ScheduledOut: now.Add(-time.Hour),
 		ScheduledIn:  now.Add(time.Hour),
@@ -288,7 +364,7 @@ func TestRefreshBackfillsMissingMetadata(t *testing.T) {
 
 	p.tick(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.OriginIATA != "LHR" || got.DestIATA != "SFO" {
 		t.Errorf("airports not backfilled: %q → %q", got.OriginIATA, got.DestIATA)
 	}
@@ -314,7 +390,7 @@ func TestRefreshBackfillNotFoundLeavesFlightAlone(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "XX9999", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 	}, uid)
 
@@ -323,7 +399,7 @@ func TestRefreshBackfillNotFoundLeavesFlightAlone(t *testing.T) {
 	if fr.calls != 1 {
 		t.Errorf("resolver should have been called exactly once, got %d", fr.calls)
 	}
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.OriginIATA != "" || got.DestIATA != "" || got.ICAO24 != nil {
 		t.Errorf("not-found should leave row blank: %+v", got)
 	}
@@ -340,7 +416,7 @@ func TestRefreshSkipsResolveWhenFresh(t *testing.T) {
 	uid := seedUser(t, s)
 	now := time.Now()
 	icao := "abc123"
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident:        "PL9",
 		ScheduledOut: now.Add(-time.Hour),
 		ScheduledIn:  now.Add(time.Hour),
@@ -349,7 +425,7 @@ func TestRefreshSkipsResolveWhenFresh(t *testing.T) {
 		ICAO24:       icao,
 	}, uid)
 	// Pretend we just resolved this flight a moment ago.
-	if err := s.RefreshFlightAirframe(ctx, f.ID, "", ""); err != nil {
+	if err := s.RefreshFlightPartAirframe(ctx, f.ID, "", ""); err != nil {
 		t.Fatalf("seed last_resolved_at: %v", err)
 	}
 
@@ -378,7 +454,7 @@ func TestLateRefreshOverwritesStaleAirframe(t *testing.T) {
 	uid := seedUser(t, s)
 	now := time.Now()
 	old := "3c4a8b" // wrong airframe stored at booking time
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident:        "LH493",
 		ScheduledOut: now.Add(-time.Hour), // already enroute
 		ScheduledIn:  now.Add(time.Hour),
@@ -388,7 +464,7 @@ func TestLateRefreshOverwritesStaleAirframe(t *testing.T) {
 
 	p.tick(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.ICAO24 == nil || *got.ICAO24 != "3c4a8c" {
 		t.Errorf("icao24 should have been overwritten by late-refresh: %v", got.ICAO24)
 	}
@@ -416,7 +492,7 @@ func TestLateRefreshSkipsFarFuture(t *testing.T) {
 	icao := "abc123"
 	// 24h before departure: ActiveFlights still won't pick it up, but if
 	// the late-refresh window is mis-tuned we'd otherwise see calls here.
-	_, _ = s.CreateFlight(ctx, store.CreateFlightPayload{
+	_, _ = mkPart(ctx, s, store.CreateFlightPayload{
 		Ident:        "PL10",
 		ScheduledOut: now.Add(24 * time.Hour),
 		ScheduledIn:  now.Add(30 * time.Hour),
@@ -440,7 +516,7 @@ func TestLateRefreshStampsEvenOnNotFound(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident:        "ZZ404",
 		ScheduledOut: now.Add(-time.Hour),
 		ScheduledIn:  now.Add(time.Hour),
@@ -450,7 +526,7 @@ func TestLateRefreshStampsEvenOnNotFound(t *testing.T) {
 
 	p.tick(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.LastResolvedAt == nil {
 		t.Error("last_resolved_at should be bumped even when the resolver returned not-found")
 	}
@@ -464,7 +540,7 @@ func TestRunImmediateTickThenStops(t *testing.T) {
 	p, s, _ := newPoller(t, tr, 20*time.Millisecond)
 	uid := seedUser(t, s)
 	now := time.Now()
-	_, _ = s.CreateFlight(context.Background(), store.CreateFlightPayload{
+	_, _ = mkPart(context.Background(), s, store.CreateFlightPayload{
 		Ident: "PL5", ScheduledOut: now.Add(-time.Hour), ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "LHR", DestIATA: "JFK",
 	}, uid)

@@ -2,13 +2,10 @@ package poller
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
 	"github.com/dpage/aerly/internal/airports"
-	"github.com/dpage/aerly/internal/api"
-	"github.com/dpage/aerly/internal/sse"
 	"github.com/dpage/aerly/internal/store"
 )
 
@@ -30,9 +27,9 @@ const sweepInterval = 4 * time.Hour
 // Per-row failures are logged and isolated; one bad row never aborts
 // the sweep.
 func (p *Poller) Sweep(ctx context.Context) {
-	flights, err := p.Store.FlightsWithMissingCoords(ctx)
+	flights, err := p.Store.FlightPartsWithMissingCoords(ctx)
 	if err != nil {
-		slog.Error("sweep: list flights with missing coords", "err", err)
+		slog.Error("sweep: list flight parts with missing coords", "err", err)
 		return
 	}
 	if len(flights) == 0 {
@@ -110,7 +107,7 @@ func (p *Poller) sweepOne(ctx context.Context, f *store.Flight, now time.Time) {
 		if rerr == nil {
 			icao24, callsign = rf.ICAO24, rf.Callsign
 		}
-		if terr := p.Store.RefreshFlightAirframe(ctx, f.ID, icao24, callsign); terr != nil {
+		if terr := p.Store.RefreshFlightPartAirframe(ctx, f.ID, icao24, callsign); terr != nil {
 			slog.Error("sweep: bump last_resolved_at", "id", f.ID, "err", terr)
 		}
 	}
@@ -118,11 +115,11 @@ func (p *Poller) sweepOne(ctx context.Context, f *store.Flight, now time.Time) {
 	if !changed {
 		return
 	}
-	if err := p.Store.BackfillFlight(ctx, f.ID, update); err != nil {
+	if err := p.Store.BackfillFlightPart(ctx, f.ID, update); err != nil {
 		slog.Error("sweep: backfill", "id", f.ID, "err", err)
 		return
 	}
-	p.publishFlightChange(ctx, f.ID)
+	p.publishPartChange(ctx, f.ID)
 }
 
 // throttleAllowed reports whether enough time has passed since the last
@@ -133,32 +130,4 @@ func throttleAllowed(f *store.Flight, now time.Time) bool {
 		return true
 	}
 	return now.Sub(*f.LastResolvedAt) >= sweepInterval
-}
-
-// publishFlightChange rebuilds the full FlightDTO for a row that just
-// had its coords updated and publishes it via the hub. Mirrors the
-// publish boilerplate in (*Poller).refresh; we duplicate rather than
-// extract a shared helper because refresh does other work (tracking,
-// status refresh) on the same call.
-func (p *Poller) publishFlightChange(ctx context.Context, id int64) {
-	fresh, err := p.Store.FlightByID(ctx, id)
-	if err != nil {
-		slog.Error("sweep: refetch", "id", id, "err", err)
-		return
-	}
-	pmap, _ := p.Store.PassengersByFlight(ctx, []int64{id})
-	smap, _ := p.Store.SharedUserIDsByFlight(ctx, []int64{id})
-	latest, _ := p.Store.LatestPositions(ctx, []int64{id})
-	tracks, _ := p.Store.RecentTracks(ctx, []int64{id}, 200)
-	dto := api.ToFlightDTO(fresh, pmap[id], smap[id], latest[id], tracks[id])
-	payload, err := json.Marshal(dto)
-	if err != nil {
-		slog.Error("sweep: marshal dto", "id", id, "err", err)
-		return
-	}
-	visible, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
-	if err != nil {
-		slog.Warn("sweep: visibility lookup failed", "id", fresh.ID, "err", err)
-	}
-	p.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
 }

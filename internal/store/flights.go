@@ -617,33 +617,44 @@ func (s *Store) CanEdit(ctx context.Context, flightID, viewerID int64) (bool, er
 	return creator != nil && *creator == viewerID, nil
 }
 
-// LatestRealPosition returns the most recent position from ADS-B / airline
-// data (i.e. NOT estimated) for a flight, or nil if there isn't one. The
-// dead-reckoner uses this as its anchor point when extrapolating across
-// coverage gaps.
-func (s *Store) LatestRealPosition(ctx context.Context, flightID int64) (*Position, error) {
-	var p Position
-	err := s.pool.QueryRow(ctx, `
-		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
-		FROM positions
-		WHERE flight_id = $1 AND is_estimated = FALSE
-		ORDER BY ts DESC
-		LIMIT 1`, flightID,
-	).Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-		&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil //nolint:nilnil // genuine "no data yet"
+// ---------------------------------------------------------------------------
+// Legacy flight_id-keyed position helpers. The Wave 1 poller/tracker re-key to
+// plan_part_id (see positions.go); these stay flight_id-keyed only so the
+// legacy /api/flights view keeps round-tripping its own positions through the
+// transition. Wave 3 retires them with the flights table. New code must use the
+// part-keyed helpers in positions.go.
+
+// LatestPositionsByFlight returns the latest position per flight for the given
+// flight IDs (legacy, flight_id-keyed).
+func (s *Store) LatestPositions(ctx context.Context, flightIDs []int64) (map[int64]*Position, error) {
+	out := map[int64]*Position{}
+	if len(flightIDs) == 0 {
+		return out, nil
 	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (flight_id)
+			flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
+		FROM positions
+		WHERE flight_id = ANY($1)
+		ORDER BY flight_id, ts DESC`, flightIDs)
 	if err != nil {
 		return nil, err
 	}
-	return &p, nil
+	defer rows.Close()
+	for rows.Next() {
+		var p Position
+		if err := rows.Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
+			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated); err != nil {
+			return nil, err
+		}
+		pCopy := p
+		out[p.FlightID] = &pCopy
+	}
+	return out, rows.Err()
 }
 
-// RecentTracks returns up to `limit` of the most recent positions per flight
-// (oldest first within each entry) for the given IDs. Used to draw the
-// "flown so far" polyline on the map. Estimated and real fixes are both
-// included; consumers can filter if they only want hard data.
+// RecentTracks returns up to perFlight recent positions per flight (oldest
+// first within each entry) for the given flight IDs (legacy, flight_id-keyed).
 func (s *Store) RecentTracks(ctx context.Context, flightIDs []int64, perFlight int) (map[int64][]*Position, error) {
 	out := map[int64][]*Position{}
 	if len(flightIDs) == 0 {
@@ -676,84 +687,7 @@ func (s *Store) RecentTracks(ctx context.Context, flightIDs []int64, perFlight i
 	return out, rows.Err()
 }
 
-// LatestPosition returns the most recent position for a single flight,
-// regardless of whether it's real or dead-reckoned. Returns (nil, nil) when
-// the flight has no positions yet.
-func (s *Store) LatestPosition(ctx context.Context, flightID int64) (*Position, error) {
-	var p Position
-	err := s.pool.QueryRow(ctx, `
-		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
-		FROM positions
-		WHERE flight_id = $1
-		ORDER BY ts DESC
-		LIMIT 1`, flightID,
-	).Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-		&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil //nolint:nilnil // genuine "no data yet"
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-// LatestPositions returns the latest position per flight for the given IDs.
-func (s *Store) LatestPositions(ctx context.Context, flightIDs []int64) (map[int64]*Position, error) {
-	out := map[int64]*Position{}
-	if len(flightIDs) == 0 {
-		return out, nil
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (flight_id)
-			flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
-		FROM positions
-		WHERE flight_id = ANY($1)
-		ORDER BY flight_id, ts DESC`, flightIDs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var p Position
-		if err := rows.Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated); err != nil {
-			return nil, err
-		}
-		pCopy := p
-		out[p.FlightID] = &pCopy
-	}
-	return out, rows.Err()
-}
-
-// PositionsForFlight returns all positions for a single flight, newest first.
-func (s *Store) PositionsForFlight(ctx context.Context, flightID int64, limit int) ([]*Position, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated
-		FROM positions
-		WHERE flight_id = $1
-		ORDER BY ts DESC
-		LIMIT $2`, flightID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Position
-	for rows.Next() {
-		var p Position
-		if err := rows.Scan(&p.FlightID, &p.Ts, &p.Lat, &p.Lon,
-			&p.AltitudeFt, &p.GroundspeedKt, &p.HeadingDeg, &p.IsEstimated); err != nil {
-			return nil, err
-		}
-		out = append(out, &p)
-	}
-	return out, rows.Err()
-}
-
-// InsertPosition appends a position sample for a flight.
+// InsertPosition appends a position sample for a flight (legacy, flight_id-keyed).
 func (s *Store) InsertPosition(ctx context.Context, p Position) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO positions (flight_id, ts, lat, lon, altitude_ft, groundspeed_kt, heading_deg, is_estimated)

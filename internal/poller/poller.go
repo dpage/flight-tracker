@@ -72,9 +72,9 @@ func (p *Poller) minPollAge(status string) time.Duration {
 
 func (p *Poller) tick(ctx context.Context) {
 	now := time.Now()
-	flights, err := p.Store.ActiveFlights(ctx, now)
+	flights, err := p.Store.ActiveFlightParts(ctx, now)
 	if err != nil {
-		slog.Error("poller: list active flights", "err", err)
+		slog.Error("poller: list active flight parts", "err", err)
 		return
 	}
 	for _, f := range flights {
@@ -112,39 +112,65 @@ func (p *Poller) refresh(ctx context.Context, f *store.Flight, now time.Time) {
 		slog.Warn("poller: track failed", "flight", f.Ident, "id", f.ID, "err", err)
 	}
 	if pos != nil {
-		if err := p.Store.InsertPosition(ctx, *pos); err != nil {
+		if err := p.Store.InsertPartPosition(ctx, *pos); err != nil {
 			slog.Error("poller: insert position", "id", f.ID, "err", err)
 		}
 	}
 	// Always refresh the status from the schedule; preserves Cancelled /
 	// Diverted, otherwise derives Scheduled / Enroute / Arrived from times.
-	if err := p.Store.RefreshFlightStatus(ctx, f.ID); err != nil {
+	if err := p.Store.RefreshFlightPartStatus(ctx, f.ID); err != nil {
 		slog.Error("poller: refresh status", "id", f.ID, "err", err)
 	}
 
-	fresh, err := p.Store.FlightByID(ctx, f.ID)
+	p.publishPartChange(ctx, f.ID)
+}
+
+// publishPartChange rebuilds the convergence payload for a flight part that
+// just refreshed and broadcasts it over the hub, scoped to the part's plan
+// visibility set (spec §4). Replaces the old flight.updated broadcast; the
+// payload is the locked TrackerPartDTO and the event type is plan_part.updated.
+// Shared by refresh and the coord sweep.
+func (p *Poller) publishPartChange(ctx context.Context, partID int64) {
+	// The poller is a trusted server-side actor and must be able to refetch any
+	// active part regardless of viewer — per-recipient visibility is applied
+	// below via VisiblePlanUserIDs on the broadcast. So we use the unscoped row
+	// fetch, not the viewer-gated TrackerPartByID. The part may have been
+	// deleted by a concurrent edit between the status write and here;
+	// ErrNotFound is the benign "row gone" case, so we just skip the broadcast
+	// (mirrors the old FlightByID refetch guard).
+	tp, err := p.Store.TrackerPartRow(ctx, partID)
 	if err != nil {
-		slog.Error("poller: refetch flight", "id", f.ID, "err", err)
+		if !errors.Is(err, store.ErrNotFound) {
+			slog.Error("poller: refetch part", "id", partID, "err", err)
+		}
 		return
 	}
-	pmap, _ := p.Store.PassengersByFlight(ctx, []int64{f.ID})
-	smap, _ := p.Store.SharedUserIDsByFlight(ctx, []int64{f.ID})
-	latest, _ := p.Store.LatestPositions(ctx, []int64{f.ID})
-	tracks, _ := p.Store.RecentTracks(ctx, []int64{f.ID}, 200)
-	dto := api.ToFlightDTO(fresh, pmap[f.ID], smap[f.ID], latest[f.ID], tracks[f.ID])
+	latest, _ := p.Store.LatestPartPositions(ctx, []int64{partID})
+	dto := api.TrackerPartDTO{
+		PlanPartID:  tp.PlanPartID,
+		PlanID:      tp.PlanID,
+		TripID:      tp.TripID,
+		OwnerID:     tp.OwnerID,
+		Title:       tp.Title,
+		Status:      tp.Status,
+		EffectiveAt: tp.EffectiveAt,
+		Ident:       tp.Ident,
+		DestIATA:    tp.DestIATA,
+	}
+	if pos := latest[partID]; pos != nil {
+		pd := api.ToPositionDTO(pos)
+		dto.LatestPosition = &pd
+	}
 	payload, err := json.Marshal(dto)
 	if err != nil {
 		slog.Error("poller: marshal dto", "err", err)
 		return
 	}
-	// Scope the broadcast to the flight's visibility set. VisibleUserIDs
-	// already includes the creator's accepted friends when is_public is
-	// true, so this always returns the correct set regardless of is_public.
-	visible, err := p.Store.VisibleUserIDs(ctx, fresh.ID)
+	visible, err := p.Store.VisiblePlanUserIDs(ctx, tp.PlanID)
 	if err != nil {
-		slog.Warn("poller: visibility lookup failed", "id", fresh.ID, "err", err)
+		slog.Warn("poller: visibility lookup failed", "plan_id", tp.PlanID, "err", err)
 	}
-	p.Hub.Publish(sse.Event{Type: "flight.updated", Data: payload, VisibleTo: visible})
+	p.Hub.Publish(sse.Event{Type: "plan_part.updated", Data: payload, VisibleTo: visible})
 }
 
 // needsBackfill is true when the resolver could meaningfully fill in at
@@ -183,8 +209,8 @@ func needsLateRefresh(f *store.Flight, now time.Time) bool {
 }
 
 // resolveAndUpdate calls the Resolver and persists the result through both
-// the empty-fill path (BackfillFlight, which protects user-typed values)
-// and the day-of overwrite path (RefreshFlightAirframe, which catches
+// the empty-fill path (BackfillFlightPart, which protects user-typed values)
+// and the day-of overwrite path (RefreshFlightPartAirframe, which catches
 // airframe swaps and bumps last_resolved_at). On error or not-found we
 // still bump last_resolved_at via an empty Refresh so the next tick
 // throttles instead of retrying immediately.
@@ -195,12 +221,12 @@ func (p *Poller) resolveAndUpdate(ctx context.Context, f *store.Flight, now time
 			slog.Warn("poller: resolve failed",
 				"ident", f.Ident, "id", f.ID, "err", err)
 		}
-		if touchErr := p.Store.RefreshFlightAirframe(ctx, f.ID, "", ""); touchErr != nil {
+		if touchErr := p.Store.RefreshFlightPartAirframe(ctx, f.ID, "", ""); touchErr != nil {
 			slog.Error("poller: stamp last_resolved_at failed", "id", f.ID, "err", touchErr)
 		}
 		return nil, err
 	}
-	if err := p.Store.BackfillFlight(ctx, f.ID, store.BackfillPayload{
+	if err := p.Store.BackfillFlightPart(ctx, f.ID, store.BackfillPayload{
 		OriginIATA: rf.OriginIATA, OriginLat: rf.OriginLat, OriginLon: rf.OriginLon,
 		DestIATA: rf.DestIATA, DestLat: rf.DestLat, DestLon: rf.DestLon,
 		ICAO24: rf.ICAO24, Callsign: rf.Callsign,
@@ -209,7 +235,7 @@ func (p *Poller) resolveAndUpdate(ctx context.Context, f *store.Flight, now time
 		slog.Error("poller: backfill write failed", "id", f.ID, "err", err)
 		return nil, err
 	}
-	if err := p.Store.RefreshFlightAirframe(ctx, f.ID, rf.ICAO24, rf.Callsign); err != nil {
+	if err := p.Store.RefreshFlightPartAirframe(ctx, f.ID, rf.ICAO24, rf.Callsign); err != nil {
 		slog.Error("poller: refresh airframe failed", "id", f.ID, "err", err)
 		return nil, err
 	}
@@ -217,5 +243,5 @@ func (p *Poller) resolveAndUpdate(ctx context.Context, f *store.Flight, now time
 		"ident", f.Ident, "id", f.ID,
 		"origin", rf.OriginIATA, "dest", rf.DestIATA,
 		"icao24", rf.ICAO24, "callsign", rf.Callsign)
-	return p.Store.FlightByID(ctx, f.ID)
+	return p.Store.FlightPartByID(ctx, f.ID)
 }

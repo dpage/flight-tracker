@@ -19,7 +19,7 @@ func TestSweep_TableFillsRow(t *testing.T) {
 	// Seed a flight whose origin IATA (BRS) is in the embedded airports
 	// table but whose dest IATA (ZZZ) is not — origin coords get filled
 	// at create time, dest coords stay NULL.
-	f, err := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, err := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "EZY2823", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
@@ -28,12 +28,15 @@ func TestSweep_TableFillsRow(t *testing.T) {
 	}
 
 	// Simulate the "deploy added SID to the airports table" case by
-	// switching dest_iata to "SID" and clearing the coords directly
-	// in SQL — the public UpdateFlight would re-run lookupCoords and
-	// fill them immediately, defeating the test.
+	// switching dest_iata (flight_details) to "SID" and clearing the part's
+	// end coords directly in SQL. The dest IATA lives on flight_details; the
+	// coords live on the plan_part (keyed by f.ID, the plan_part_id).
 	if _, err := s.Pool().Exec(ctx,
-		`UPDATE flights SET dest_iata = 'SID', dest_lat = NULL, dest_lon = NULL WHERE id = $1`,
-		f.ID); err != nil {
+		`UPDATE flight_details SET dest_iata = 'SID' WHERE plan_part_id = $1`, f.ID); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := s.Pool().Exec(ctx,
+		`UPDATE plan_parts SET end_lat = NULL, end_lon = NULL WHERE id = $1`, f.ID); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
@@ -43,7 +46,7 @@ func TestSweep_TableFillsRow(t *testing.T) {
 
 	p.Sweep(ctx)
 
-	got, err := s.FlightByID(ctx, f.ID)
+	got, err := s.FlightPartByID(ctx, f.ID)
 	if err != nil {
 		t.Fatalf("refetch: %v", err)
 	}
@@ -70,7 +73,7 @@ func TestSweep_NoNullRowsIsNoOp(t *testing.T) {
 
 	// Single flight, both IATAs known → all four coord columns populated
 	// at create time. Sweep should find zero candidates.
-	if _, err := s.CreateFlight(ctx, store.CreateFlightPayload{
+	if _, err := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "LH400", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "FRA", DestIATA: "JFK",
 	}, uid); err != nil {
@@ -102,7 +105,7 @@ func TestSweep_ResolverFillsUnknownIATA(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, err := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, err := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "EZY2823", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ", // dest not in table
 	}, uid)
@@ -115,7 +118,7 @@ func TestSweep_ResolverFillsUnknownIATA(t *testing.T) {
 
 	p.Sweep(ctx)
 
-	got, err := s.FlightByID(ctx, f.ID)
+	got, err := s.FlightPartByID(ctx, f.ID)
 	if err != nil {
 		t.Fatalf("refetch: %v", err)
 	}
@@ -143,14 +146,14 @@ func TestSweep_ResolverNotFoundLeavesNull(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "XX9999", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
 
 	p.Sweep(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.DestLat != nil {
 		t.Errorf("dest_lat should remain NULL on resolver-not-found; got %v", got.DestLat)
 	}
@@ -172,7 +175,7 @@ func TestSweep_ThrottleHoldsRecentRow(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "EZY2823", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
@@ -180,13 +183,13 @@ func TestSweep_ThrottleHoldsRecentRow(t *testing.T) {
 	// Stamp last_resolved_at to "right now" so the throttle blocks the
 	// resolver call on the next sweep. RefreshFlightAirframe with empty
 	// strings bumps the timestamp without touching airframe columns.
-	if err := s.RefreshFlightAirframe(ctx, f.ID, "", ""); err != nil {
+	if err := s.RefreshFlightPartAirframe(ctx, f.ID, "", ""); err != nil {
 		t.Fatalf("stamp: %v", err)
 	}
 
 	p.Sweep(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if resolver.calls != 0 {
 		t.Errorf("resolver should not have been called (throttled); calls = %d", resolver.calls)
 	}
@@ -201,7 +204,7 @@ func TestSweep_NoResolverConfiguredTableOnly(t *testing.T) {
 	ctx := context.Background()
 	uid := seedUser(t, s)
 	now := time.Now()
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "EZY2823", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
@@ -210,7 +213,7 @@ func TestSweep_NoResolverConfiguredTableOnly(t *testing.T) {
 	// doesn't know ZZZ, resolver path skipped).
 	p.Sweep(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.DestLat != nil {
 		t.Errorf("dest_lat should remain NULL with no resolver and unknown IATA; got %v", got.DestLat)
 	}
@@ -236,24 +239,24 @@ func TestSweep_MixedBatchPerRowIsolation(t *testing.T) {
 	// (a) Table-fillable: BRS → SID (both in table); seeded with
 	// dest_lat NULL via direct SQL to simulate the "deploy added SID"
 	// case.
-	a, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	a, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "TABLE-ME", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "SID",
 	}, uid)
 	if _, err := s.Pool().Exec(ctx,
-		`UPDATE flights SET dest_lat = NULL, dest_lon = NULL WHERE id = $1`, a.ID); err != nil {
+		`UPDATE plan_parts SET end_lat = NULL, end_lon = NULL WHERE id = $1`, a.ID); err != nil {
 		t.Fatalf("setup a: %v", err)
 	}
 
 	// (b) Resolver-fillable: ident matches the fake resolver's match.
-	b, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	b, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "RESOLVE-ME", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
 
 	// (c) Unfillable: ident the resolver returns ErrFlightNotFound for,
 	// dest IATA not in the table.
-	c, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	c, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "UNFILL-ME", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "QQQ",
 	}, uid)
@@ -263,15 +266,15 @@ func TestSweep_MixedBatchPerRowIsolation(t *testing.T) {
 
 	p.Sweep(ctx)
 
-	gotA, _ := s.FlightByID(ctx, a.ID)
+	gotA, _ := s.FlightPartByID(ctx, a.ID)
 	if gotA.DestLat == nil || *gotA.DestLat != 16.7414 {
 		t.Errorf("table-fillable row: dest_lat = %v, want 16.7414", gotA.DestLat)
 	}
-	gotB, _ := s.FlightByID(ctx, b.ID)
+	gotB, _ := s.FlightPartByID(ctx, b.ID)
 	if gotB.DestLat == nil || *gotB.DestLat != 12.3456 {
 		t.Errorf("resolver-fillable row: dest_lat = %v, want 12.3456", gotB.DestLat)
 	}
-	gotC, _ := s.FlightByID(ctx, c.ID)
+	gotC, _ := s.FlightPartByID(ctx, c.ID)
 	if gotC.DestLat != nil {
 		t.Errorf("unfillable row: dest_lat = %v, want nil", gotC.DestLat)
 	}
@@ -294,7 +297,7 @@ func TestSweep_PartiallyUnknownPreservesTableFilledLeg(t *testing.T) {
 	now := time.Now()
 	// Seed with origin=BRS (in table) and dest=ZZZ (not in table). The
 	// create-time helper fills origin coords, dest stays NULL.
-	f, _ := s.CreateFlight(ctx, store.CreateFlightPayload{
+	f, _ := mkPart(ctx, s, store.CreateFlightPayload{
 		Ident: "EZY2823", ScheduledOut: now, ScheduledIn: now.Add(time.Hour),
 		OriginIATA: "BRS", DestIATA: "ZZZ",
 	}, uid)
@@ -302,13 +305,13 @@ func TestSweep_PartiallyUnknownPreservesTableFilledLeg(t *testing.T) {
 	// them — this exercises the "table fills one leg, resolver fills
 	// the other" code path.
 	if _, err := s.Pool().Exec(ctx,
-		`UPDATE flights SET origin_lat = NULL, origin_lon = NULL WHERE id = $1`, f.ID); err != nil {
+		`UPDATE plan_parts SET start_lat = NULL, start_lon = NULL WHERE id = $1`, f.ID); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 
 	p.Sweep(ctx)
 
-	got, _ := s.FlightByID(ctx, f.ID)
+	got, _ := s.FlightPartByID(ctx, f.ID)
 	if got.OriginLat == nil {
 		t.Fatalf("origin_lat should be table-filled (51.3827), got nil")
 	}
@@ -336,4 +339,3 @@ func (r *resolveByIdent) Resolve(_ context.Context, ident string, _ time.Time) (
 	}
 	return nil, providers.ErrFlightNotFound
 }
-
