@@ -1,8 +1,9 @@
 import { vi } from 'vitest';
 
-// Minimal maplibre-gl stand-in implementing exactly the surface FlightMap
-// uses. Named type exports (Map/Marker/GeoJSONSource/StyleSpecification/
-// LngLatBoundsLike) are erased by tsc, so only the runtime `default` matters.
+// Minimal maplibre-gl stand-in implementing exactly the surface the map
+// components (TripMap/TrackerMap) use. Named type exports (Map/Marker/
+// GeoJSONSource/StyleSpecification/LngLatBoundsLike) are erased by tsc, so only
+// the runtime `default` matters.
 
 export interface FakeSource {
   setData: ReturnType<typeof vi.fn>;

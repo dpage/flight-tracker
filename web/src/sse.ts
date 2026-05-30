@@ -1,9 +1,20 @@
-import type { Flight, Notifications } from './api/types';
+import type { Notifications, TrackerPart } from './api/types';
 
 export interface SSEHandlers {
-  onFlight: (flight: Flight) => void;
-  onDelete: (id: number) => void;
   onNotifications: (n: Notifications) => void;
+  /** A trackable part refreshed: the poller broadcasts plan_part.updated with
+   * a TrackerPartDTO. Drives the tracker convergence list and the open trip's
+   * timeline live (PRD live-updating shared timeline). */
+  onPlanPart: (part: TrackerPart) => void;
+  /** Optional: a trip's metadata changed. The backend does not emit
+   * `trip.updated` yet — wired defensively so the handler is a no-op when the
+   * event never arrives, and lights up automatically if the backend starts
+   * publishing it. Payload carries at least the trip id. */
+  onTrip?: (id: number) => void;
+  /** Optional: a plan changed. The backend does not emit `plan.updated` yet —
+   * wired defensively (see onTrip). Payload carries at least the trip id so the
+   * client can refresh the right trip. */
+  onPlan?: (tripId: number) => void;
 }
 
 export interface SSEOptions {
@@ -12,9 +23,10 @@ export interface SSEOptions {
 }
 
 // connectSSE returns a teardown function. It auto-reconnects with backoff on
-// transient errors. The server pushes flight.updated events from both the
-// poller and user-driven writes (create / update / passenger ops) and
-// flight.deleted events when a flight is removed.
+// transient errors. The poller pushes plan_part.updated events carrying the
+// locked TrackerPartDTO; notifications.updated tracks the friendship badge.
+// trip.updated / plan.updated are subscribed defensively — the backend does
+// not emit them today, so those listeners are dormant until it does.
 export function connectSSE(handlers: SSEHandlers, opts: SSEOptions = {}): () => void {
   let es: EventSource | null = null;
   let stopped = false;
@@ -27,18 +39,26 @@ export function connectSSE(handlers: SSEHandlers, opts: SSEOptions = {}): () => 
     es.addEventListener('open', () => {
       retry = 1000;
     });
-    es.addEventListener('flight.updated', (ev) => {
+    es.addEventListener('plan_part.updated', (ev) => {
       try {
-        const f = JSON.parse((ev as MessageEvent).data) as Flight;
-        handlers.onFlight(f);
+        const part = JSON.parse((ev as MessageEvent).data) as TrackerPart;
+        handlers.onPlanPart(part);
       } catch (err) {
         console.error('bad SSE payload', err);
       }
     });
-    es.addEventListener('flight.deleted', (ev) => {
+    es.addEventListener('trip.updated', (ev) => {
       try {
         const { id } = JSON.parse((ev as MessageEvent).data) as { id: number };
-        handlers.onDelete(id);
+        handlers.onTrip?.(id);
+      } catch (err) {
+        console.error('bad SSE payload', err);
+      }
+    });
+    es.addEventListener('plan.updated', (ev) => {
+      try {
+        const { trip_id } = JSON.parse((ev as MessageEvent).data) as { trip_id: number };
+        handlers.onPlan?.(trip_id);
       } catch (err) {
         console.error('bad SSE payload', err);
       }

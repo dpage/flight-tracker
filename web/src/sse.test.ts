@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { connectSSE } from './sse';
-import type { Flight } from './api/types';
+import { connectSSE, type SSEHandlers } from './sse';
+import type { TrackerPart } from './api/types';
 
 type Listener = (ev: unknown) => void;
 
@@ -31,16 +31,15 @@ class FakeEventSource {
   }
 }
 
-const flight: Flight = {
-  id: 1,
+const part: TrackerPart = {
+  plan_part_id: 1,
+  plan_id: 2,
+  trip_id: 3,
+  title: 'BA1',
+  status: 'Enroute',
+  effective_at: '2024-01-01T10:00:00Z',
   ident: 'BA1',
-  scheduled_out: '',
-  scheduled_in: '',
-  origin_iata: '',
-  dest_iata: '',
-  status: 'Scheduled',
-  notes: '',
-  passenger_ids: [],
+  dest_iata: 'JFK',
 };
 
 beforeEach(() => {
@@ -54,8 +53,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function noopHandlers() {
-  return { onFlight: () => {}, onDelete: () => {}, onNotifications: () => {} };
+function noopHandlers(): SSEHandlers {
+  return { onPlanPart: () => {}, onNotifications: () => {} };
 }
 
 describe('connectSSE', () => {
@@ -67,16 +66,20 @@ describe('connectSSE', () => {
     teardown();
   });
 
+  it('appends show_all=1 to the URL when requested', () => {
+    const teardown = connectSSE(noopHandlers(), { showAll: true });
+    expect(FakeEventSource.instances[0].url).toBe('/api/events?show_all=1');
+    teardown();
+  });
+
   it('open handler resets retry backoff', () => {
     const teardown = connectSSE(noopHandlers());
     const es = FakeEventSource.instances[0];
-    // Trigger an error to bump retry, then open again to reset it.
     es.emit('error');
-    vi.advanceTimersByTime(1000); // reconnect (delay was 1000)
+    vi.advanceTimersByTime(1000);
     const es2 = FakeEventSource.instances[1];
-    es2.emit('open'); // resets retry to 1000
+    es2.emit('open');
     es2.emit('error');
-    // After reset, delay should be 1000 again (not doubled).
     expect(FakeEventSource.instances).toHaveLength(2);
     vi.advanceTimersByTime(999);
     expect(FakeEventSource.instances).toHaveLength(2);
@@ -85,39 +88,47 @@ describe('connectSSE', () => {
     teardown();
   });
 
-  it('flight.updated with good payload calls onFlight', () => {
-    const onFlight = vi.fn();
-    const teardown = connectSSE({ onFlight, onDelete: () => {} });
-    FakeEventSource.instances[0].emit('flight.updated', { data: JSON.stringify(flight) });
-    expect(onFlight).toHaveBeenCalledWith(flight);
+  it('plan_part.updated with good payload calls onPlanPart', () => {
+    const onPlanPart = vi.fn();
+    const teardown = connectSSE({ onPlanPart, onNotifications: () => {} });
+    FakeEventSource.instances[0].emit('plan_part.updated', { data: JSON.stringify(part) });
+    expect(onPlanPart).toHaveBeenCalledWith(part);
     teardown();
   });
 
-  it('flight.deleted with good payload calls onDelete', () => {
-    const onDelete = vi.fn();
-    const teardown = connectSSE({ onFlight: () => {}, onDelete });
-    FakeEventSource.instances[0].emit('flight.deleted', { data: JSON.stringify({ id: 42 }) });
-    expect(onDelete).toHaveBeenCalledWith(42);
-    teardown();
-  });
-
-  it('bad JSON payload on flight.updated is caught and logged', () => {
+  it('bad JSON payload on plan_part.updated is caught and logged', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const onFlight = vi.fn();
-    const teardown = connectSSE({ onFlight, onDelete: () => {} });
-    FakeEventSource.instances[0].emit('flight.updated', { data: '{not json' });
-    expect(onFlight).not.toHaveBeenCalled();
+    const onPlanPart = vi.fn();
+    const teardown = connectSSE({ onPlanPart, onNotifications: () => {} });
+    FakeEventSource.instances[0].emit('plan_part.updated', { data: '{not json' });
+    expect(onPlanPart).not.toHaveBeenCalled();
     expect(err).toHaveBeenCalledWith('bad SSE payload', expect.anything());
     teardown();
   });
 
-  it('bad JSON payload on flight.deleted is caught and logged', () => {
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const onDelete = vi.fn();
-    const teardown = connectSSE({ onFlight: () => {}, onDelete });
-    FakeEventSource.instances[0].emit('flight.deleted', { data: '{not json' });
-    expect(onDelete).not.toHaveBeenCalled();
-    expect(err).toHaveBeenCalledWith('bad SSE payload', expect.anything());
+  it('trip.updated fires the optional onTrip with the trip id', () => {
+    const onTrip = vi.fn();
+    const teardown = connectSSE({ ...noopHandlers(), onTrip });
+    FakeEventSource.instances[0].emit('trip.updated', { data: JSON.stringify({ id: 9 }) });
+    expect(onTrip).toHaveBeenCalledWith(9);
+    teardown();
+  });
+
+  it('plan.updated fires the optional onPlan with the trip id', () => {
+    const onPlan = vi.fn();
+    const teardown = connectSSE({ ...noopHandlers(), onPlan });
+    FakeEventSource.instances[0].emit('plan.updated', { data: JSON.stringify({ trip_id: 7 }) });
+    expect(onPlan).toHaveBeenCalledWith(7);
+    teardown();
+  });
+
+  it('trip.updated / plan.updated are safe no-ops when no handler is supplied', () => {
+    // The backend does not emit these yet; subscribing without onTrip/onPlan
+    // must not throw if a stray event ever arrives.
+    const teardown = connectSSE(noopHandlers());
+    const es = FakeEventSource.instances[0];
+    expect(() => es.emit('trip.updated', { data: JSON.stringify({ id: 1 }) })).not.toThrow();
+    expect(() => es.emit('plan.updated', { data: JSON.stringify({ trip_id: 1 }) })).not.toThrow();
     teardown();
   });
 
@@ -126,22 +137,18 @@ describe('connectSSE', () => {
     const es0 = FakeEventSource.instances[0];
     es0.emit('error');
     expect(es0.closed).toBe(true);
-    // delay 1000 -> reconnect
     vi.advanceTimersByTime(1000);
     expect(FakeEventSource.instances).toHaveLength(2);
-    // next backoff 2000
     FakeEventSource.instances[1].emit('error');
     vi.advanceTimersByTime(1999);
     expect(FakeEventSource.instances).toHaveLength(2);
     vi.advanceTimersByTime(1);
     expect(FakeEventSource.instances).toHaveLength(3);
-    // Keep erroring to drive backoff to its 30s cap.
     for (let i = 2; i < 20; i++) {
       const es = FakeEventSource.instances[FakeEventSource.instances.length - 1];
       es.emit('error');
       vi.advanceTimersByTime(30_000);
     }
-    // It still reconnects (capped, not stalled).
     expect(FakeEventSource.instances.length).toBeGreaterThan(5);
     teardown();
   });
@@ -151,17 +158,16 @@ describe('connectSSE', () => {
     const es = FakeEventSource.instances[0];
     teardown();
     expect(es.closed).toBe(true);
-    es.emit('error'); // stopped -> early return, no setTimeout scheduled
+    es.emit('error');
     vi.advanceTimersByTime(60_000);
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
   it('open() early-returns when already stopped (scheduled reconnect fires after teardown)', () => {
     const teardown = connectSSE(noopHandlers());
-    FakeEventSource.instances[0].emit('error'); // schedules a reconnect in 1000ms
-    teardown(); // sets stopped = true before the timer fires
+    FakeEventSource.instances[0].emit('error');
+    teardown();
     vi.advanceTimersByTime(5000);
-    // open() ran but early-returned because stopped — no new EventSource.
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 });
@@ -169,23 +175,17 @@ describe('connectSSE', () => {
 describe('notifications.updated events', () => {
   it('parses payload and forwards to onNotifications', () => {
     const onNotifications = vi.fn();
-    const onFlight = vi.fn();
-    const onDelete = vi.fn();
-    const teardown = connectSSE({ onFlight, onDelete, onNotifications });
-
+    const teardown = connectSSE({ onPlanPart: vi.fn(), onNotifications });
     const es = FakeEventSource.instances[0];
     es.emit('notifications.updated', { data: JSON.stringify({ friend_requests_pending: 4 }) });
     expect(onNotifications).toHaveBeenCalledWith({ friend_requests_pending: 4 });
-
     teardown();
   });
 
   it('logs and ignores a malformed notifications payload', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onNotifications = vi.fn();
-    const teardown = connectSSE({
-      onFlight: vi.fn(), onDelete: vi.fn(), onNotifications,
-    });
+    const teardown = connectSSE({ onPlanPart: vi.fn(), onNotifications });
     const es = FakeEventSource.instances[0];
     es.emit('notifications.updated', { data: '{not-json}' });
     expect(onNotifications).not.toHaveBeenCalled();

@@ -10,7 +10,7 @@ import { useStore } from '../state/store';
 import type { Plan, PlanPart } from '../api/types';
 import { greatCircle, toMultiLine } from '../lib/great-circle';
 
-// Same raster style FlightMap uses (spec §11: reuse FlightMap/MapLibre).
+// Standard OSM raster style for the trip map (spec §11: MapLibre).
 const STYLE: StyleSpecification = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',

@@ -70,6 +70,9 @@ export interface ResolvedFlight {
   notes: string;
 }
 
+// The legacy single-flight model was retired in the trip-planning cut-over.
+// The `Flight` shape and its `FlightStatus` survive because the Statistics
+// dialog's flown/upcoming rollup (state/stats.ts) still reads /api/flights.
 export type FlightStatus =
   | 'Scheduled'
   | 'Boarding'
@@ -116,30 +119,6 @@ export interface Flight {
   latest_position?: Position;
   /** Recent positions in order (oldest → newest), for the flown-track line. */
   track?: Position[];
-}
-
-export interface CreateFlightInput {
-  ident: string;
-  scheduled_out: string;
-  scheduled_in: string;
-  origin_iata: string;
-  dest_iata: string;
-  icao24?: string;
-  notes?: string;
-  passenger_ids?: number[];
-  shared_user_ids?: number[];
-  is_public?: boolean;
-}
-
-export interface UpdateFlightInput {
-  scheduled_out?: string;
-  scheduled_in?: string;
-  origin_iata?: string;
-  dest_iata?: string;
-  icao24?: string;
-  notes?: string;
-  status?: FlightStatus;
-  is_public?: boolean;
 }
 
 export interface InviteUserInput {

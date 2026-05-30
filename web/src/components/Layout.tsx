@@ -44,9 +44,9 @@ import CalendarSubscribeDialog from './CalendarSubscribeDialog';
  *
  * Holds the top bar (Trips / Tracker nav, the "New trip"/"Add to trip" primary
  * action that replaces the old "Add flight", and the account menu) plus the
- * account-level dialogs, and renders the routed page via `<Outlet>`. The legacy
- * flight-centric `AppShell` stays reachable at `/flights` until Wave 3 removes
- * it. Dialogs live below routing, exactly as before. */
+ * account-level dialogs, and renders the routed page via `<Outlet>`. This is the
+ * sole app shell now that the legacy flight-centric `AppShell` has been retired.
+ * Dialogs live below routing, exactly as before. */
 export default function Layout() {
   const me = useStore((s) => s.me);
   const logout = useStore((s) => s.logout);

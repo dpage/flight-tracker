@@ -27,7 +27,7 @@ describe('request via api.*', () => {
 
   it('returns undefined for 204', async () => {
     mockFetch(() => ({ status: 204, ok: true }) as unknown as Response);
-    const out = await api.deleteFlight(7);
+    const out = await api.deleteUser(7);
     expect(out).toBeUndefined();
   });
 
@@ -66,32 +66,18 @@ describe('request via api.*', () => {
   });
 
   it('sends a JSON body and Content-Type when a body is provided', async () => {
-    const spy = mockFetch(() => jsonResponse({ id: 9 }));
-    await api.createFlight({
-      ident: 'BA1',
-      scheduled_out: 'a',
-      scheduled_in: 'b',
-      origin_iata: 'LHR',
-      dest_iata: 'JFK',
-    });
+    const spy = mockFetch(() => jsonResponse({ ident: 'BA1' }));
+    await api.resolveFlight({ ident: 'BA1', date: '2024-01-01' });
     const [path, init] = spy.mock.calls[0];
-    expect(path).toBe('/api/flights');
+    expect(path).toBe('/api/flights/resolve');
     expect(init?.method).toBe('POST');
-    expect(init?.body).toBe(
-      JSON.stringify({
-        ident: 'BA1',
-        scheduled_out: 'a',
-        scheduled_in: 'b',
-        origin_iata: 'LHR',
-        dest_iata: 'JFK',
-      }),
-    );
+    expect(init?.body).toBe(JSON.stringify({ ident: 'BA1', date: '2024-01-01' }));
     expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
   });
 
   it('omits body and Content-Type when there is no body', async () => {
     const spy = mockFetch(() => jsonResponse({ id: 1 }));
-    await api.getFlight(1);
+    await api.getMe();
     const [, init] = spy.mock.calls[0];
     expect(init?.body).toBeUndefined();
     expect((init?.headers as Record<string, string>)['Content-Type']).toBeUndefined();
@@ -147,51 +133,10 @@ describe('every api.* method calls fetch with the right method/path/body', () =>
     expect(last()[0]).toBe('/api/flights?show_all=1&show_old=1');
   });
 
-  it('getFlight', async () => {
-    await api.getFlight(42);
-    expect(last()[0]).toBe('/api/flights/42');
-  });
-
-  it('createFlight', async () => {
-    await api.createFlight({
-      ident: 'X',
-      scheduled_out: 'a',
-      scheduled_in: 'b',
-      origin_iata: 'A',
-      dest_iata: 'B',
-    });
-    expect(last()[0]).toBe('/api/flights');
-    expect(last()[1]?.method).toBe('POST');
-  });
-
   it('resolveFlight', async () => {
     await api.resolveFlight({ ident: 'BA1', date: '2024-01-01' });
     expect(last()[0]).toBe('/api/flights/resolve');
     expect(last()[1]?.method).toBe('POST');
-  });
-
-  it('updateFlight', async () => {
-    await api.updateFlight(5, { notes: 'hi' });
-    expect(last()[0]).toBe('/api/flights/5');
-    expect(last()[1]?.method).toBe('PATCH');
-  });
-
-  it('deleteFlight', async () => {
-    mockFetch(() => ({ status: 204, ok: true }) as unknown as Response);
-    await api.deleteFlight(5);
-  });
-
-  it('addPassenger', async () => {
-    await api.addPassenger(3, 9);
-    expect(last()[0]).toBe('/api/flights/3/passengers');
-    expect(last()[1]?.method).toBe('POST');
-    expect(last()[1]?.body).toBe(JSON.stringify({ user_id: 9 }));
-  });
-
-  it('removePassenger', async () => {
-    await api.removePassenger(3, 9);
-    expect(last()[0]).toBe('/api/flights/3/passengers/9');
-    expect(last()[1]?.method).toBe('DELETE');
   });
 
   it('listUsers', async () => {

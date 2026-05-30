@@ -9,7 +9,6 @@ import { connectSSE } from './sse';
 import { api } from './api/client';
 import { createAppTheme, useThemeMode } from './theme';
 import Login from './components/Login';
-import AppShell from './components/AppShell';
 import Layout from './components/Layout';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import TermsOfService from './components/TermsOfService';
@@ -29,9 +28,9 @@ export default function App() {
   const refreshNotifications = useStore((s) => s.refreshNotifications);
   const refreshFriendships = useStore((s) => s.refreshFriendships);
   const refreshUsers = useStore((s) => s.refreshUsers);
-  const refreshFlights = useStore((s) => s.refreshFlights);
-  const applyFlightUpdate = useStore((s) => s.applyFlightUpdate);
-  const applyFlightDelete = useStore((s) => s.applyFlightDelete);
+  const applyPlanPartUpdate = useStore((s) => s.applyPlanPartUpdate);
+  const loadTrip = useStore((s) => s.loadTrip);
+  const loadTracker = useStore((s) => s.loadTracker);
   const applyNotificationsUpdate = useStore((s) => s.applyNotificationsUpdate);
   const users = useStore((s) => s.users);
   const showAll = useStore((s) => s.showAll);
@@ -47,8 +46,23 @@ export default function App() {
     if (auth !== 'authenticated') return;
     return connectSSE(
       {
-        onFlight: (f) => applyFlightUpdate(f),
-        onDelete: (id) => applyFlightDelete(id),
+        // The poller broadcasts plan_part.updated (a TrackerPartDTO) when a
+        // tracked part refreshes. Fold it into the open trip's timeline and the
+        // tracker convergence list so the shared timeline updates live.
+        onPlanPart: (part) => applyPlanPartUpdate(part),
+        // trip.updated / plan.updated aren't emitted by the backend yet (see
+        // sse.ts). These handlers are wired defensively so the moment the
+        // backend starts publishing them the relevant view refetches itself;
+        // until then they never fire.
+        onTrip: (id) => {
+          const cur = useStore.getState().currentTrip;
+          if (cur && cur.id === id) void loadTrip(id);
+        },
+        onPlan: (tripId) => {
+          const cur = useStore.getState().currentTrip;
+          if (cur && cur.id === tripId) void loadTrip(tripId);
+          void loadTracker();
+        },
         onNotifications: (n) => {
           applyNotificationsUpdate(n);
           // The server fires notifications.updated whenever the viewer's
@@ -57,27 +71,20 @@ export default function App() {
           // friend list and the cached user records need to come along too,
           // or the share/passenger pickers and the friends dialog will keep
           // showing stale "User #N" entries for newly-accepted friends.
-          //
-          // Flights too: "Share with all friends" flights from a peer are
-          // visible via the friendship edge, so unfriending should make
-          // them disappear immediately. Without this refresh the server's
-          // visibility filter would drop them on the *next* list, but the
-          // client's cached list would keep showing them until reload.
           void refreshFriendships();
           void refreshUsers();
-          void refreshFlights();
         },
       },
       { showAll },
     );
   }, [
     auth,
-    applyFlightUpdate,
-    applyFlightDelete,
+    applyPlanPartUpdate,
+    loadTrip,
+    loadTracker,
     applyNotificationsUpdate,
     refreshFriendships,
     refreshUsers,
-    refreshFlights,
     showAll,
   ]);
 
@@ -137,8 +144,7 @@ export default function App() {
   // /privacy and /terms render regardless of auth (they're linked from the
   // login page and from emails). Everything else is gated: a spinner while
   // auth is resolving, the Login screen when anonymous, and the routed app
-  // chrome once authenticated. The legacy flight UI stays reachable at
-  // /flights until Wave 3 retires it.
+  // chrome once authenticated. The home route (`/`) is the trip list.
   let gated;
   if (auth === 'loading') {
     gated = (
@@ -159,8 +165,6 @@ export default function App() {
           </Route>
           <Route path="tracker" element={<Tracker />} />
         </Route>
-        {/* Legacy flight-centric home; removed in Wave 3. */}
-        <Route path="/flights" element={<AppShell />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
