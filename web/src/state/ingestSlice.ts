@@ -33,7 +33,10 @@ export const createIngestSlice: StateCreator<StoreState, [], [], IngestSlice> = 
       const res = await api.ingest(tripId, input);
       set({ ingestProposals: res.proposals, ingestTripId: tripId, ingestBusy: false });
     } catch (err) {
+      // Surface to the global snackbar AND rethrow so the dialog can stay on
+      // the input step rather than dropping into an empty confirm view.
       set({ error: errorMessage(err), ingestBusy: false });
+      throw err;
     }
   },
 
@@ -45,6 +48,7 @@ export const createIngestSlice: StateCreator<StoreState, [], [], IngestSlice> = 
       if (get().currentTrip?.id === tripId) await get().loadTrip(tripId);
     } catch (err) {
       set({ error: errorMessage(err), ingestBusy: false });
+      throw err;
     }
   },
 

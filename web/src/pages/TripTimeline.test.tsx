@@ -147,12 +147,32 @@ describe('TripTimeline', () => {
     expect(screen.getByText(/3 nights/)).toBeInTheDocument();
   });
 
-  it('greys a superseded (cancelled rebooking) part and tags it', () => {
+  it('greys a cancelled (superseded old) part and tags it, not the replacement', () => {
+    // On a rebooking the OLD part is stamped status='cancelled'; the NEW part
+    // carries supersedes_id and stays full-colour. The greying/tag keys on the
+    // cancelled status, so the OLD leg (id 3) is greyed+tagged and the NEW leg
+    // (id 4, supersedes_id set, planned) is not.
     state.currentTrip = tripWith([
-      plan([part({ id: 3, status: 'cancelled', supersedes_id: 99 })], { id: 1 }),
+      plan(
+        [
+          part({ id: 3, status: 'cancelled', effective_at: '2026-10-12T09:00:00Z' }),
+          part({
+            id: 4,
+            status: 'planned',
+            supersedes_id: 3,
+            effective_at: '2026-10-12T14:00:00Z',
+          }),
+        ],
+        { id: 1 },
+      ),
     ]);
     renderTimeline();
-    expect(screen.getByText('superseded')).toBeInTheDocument();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    // Only the cancelled part is greyed.
+    const oldCard = screen.getByTestId('part-card-3');
+    const newCard = screen.getByTestId('part-card-4');
+    expect(oldCard).toHaveStyle({ opacity: '0.55' });
+    expect(newCard).toHaveStyle({ opacity: '1' });
   });
 
   it('links a flight part through to the tracker', () => {

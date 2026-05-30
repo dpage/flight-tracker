@@ -130,11 +130,13 @@ interface PartCardProps {
 }
 
 function PartCard({ part, plan, accent, multiPart, onOpenPlan }: PartCardProps) {
-  // Superseded-but-not-dismissed parts stay on the timeline, greyed out, with
-  // their replacement shown alongside (PRD §6.2/§6.9). Dismissed parts are
-  // already dropped by buildTimeline().
-  const superseded = part.supersedes_id != null && part.status === 'cancelled';
-  const greyed = superseded || part.status === 'cancelled';
+  // A cancelled part stays on the timeline, greyed out, until it's tidied
+  // away (PRD §6.2/§6.9). On a rebooking the OLD part is the one stamped
+  // `status='cancelled'` and marked superseded — the NEW part carries
+  // `supersedes_id` and stays full-colour. So we key the greying purely on
+  // `status === 'cancelled'`, which also correctly greys a plain cancellation.
+  // Dismissed parts are already dropped by buildTimeline().
+  const greyed = part.status === 'cancelled';
   const band = isHotelBand(part);
 
   return (
@@ -170,8 +172,8 @@ function PartCard({ part, plan, accent, multiPart, onOpenPlan }: PartCardProps) 
             {part.status === 'confirmed' && (
               <Chip label="confirmed" size="small" color="success" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
             )}
-            {superseded && (
-              <Chip label="superseded" size="small" color="warning" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
+            {greyed && (
+              <Chip label="cancelled" size="small" color="warning" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
             )}
           </Stack>
 
