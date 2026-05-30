@@ -11,6 +11,7 @@ import (
 	"github.com/dpage/aerly/internal/auth"
 	"github.com/dpage/aerly/internal/config"
 	"github.com/dpage/aerly/internal/emailingest"
+	"github.com/dpage/aerly/internal/planops"
 	"github.com/dpage/aerly/internal/providers"
 	"github.com/dpage/aerly/internal/sse"
 	"github.com/dpage/aerly/internal/store"
@@ -22,6 +23,11 @@ type API struct {
 	Hub      *sse.Hub
 	Config   *config.Config
 	Resolver providers.Resolver // may be nil if no resolver is configured
+
+	// Extractor backs the paste/upload ingest endpoints (the LLM seam). May
+	// be nil when no LLM provider is configured — the ingest endpoints then
+	// return 503.
+	Extractor planops.Extractor
 
 	// SendVerifyEmail dispatches the verification message. Defaulted in
 	// New() to the real sendmail pipe; tests can override.

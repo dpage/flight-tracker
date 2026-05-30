@@ -13,6 +13,7 @@ import (
 
 	"github.com/dpage/aerly/internal/emailingest"
 	"github.com/dpage/aerly/internal/flightops"
+	"github.com/dpage/aerly/internal/planops"
 	"github.com/dpage/aerly/internal/providers"
 	"github.com/dpage/aerly/internal/sse"
 	"github.com/dpage/aerly/internal/store"
@@ -115,6 +116,17 @@ func newHarness(t *testing.T, llmResp string, resolverErr error, requireDKIM boo
 		t.Fatal(err)
 	}
 	return &harness{svc: svc, sendmailOut: sendmailOut, maildir: maildir, store: s, hub: hub}
+}
+
+// enablePlanCapture wires the planops path on the harness's Service, so
+// processOne also runs the generalized capture (non-flight plans + trip
+// selection). The same fake LLM backs it.
+func (h *harness) enablePlanCapture(llmResp string) {
+	h.svc.PlanDeps = planops.Deps{
+		Store:     h.store,
+		Extractor: emailingest.NewExtractor(&fakeLLM{resp: llmResp}, "test"),
+		Resolver:  fakeResolver{},
+	}
 }
 
 // runUntilProcessed runs svc.Run in a goroutine and waits up to timeout for
@@ -406,5 +418,96 @@ func TestIngest_ManualFallback_PublishesSSE(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected flight.updated SSE event after manual-fallback insert")
+	}
+}
+
+// TestIngest_PlanCapture_AutoCreatesTrip exercises the rewired Service planops
+// path: an email with a non-flight booking and no matching trip auto-creates a
+// trip and commits the plan against it (surfaced, not silently dropped).
+func TestIngest_PlanCapture_AutoCreatesTrip(t *testing.T) {
+	// The LLM returns a hotel-only plan. Extract (flights schema) finds no
+	// flights; ExtractPlans (plans schema) finds the hotel.
+	llmResp := `{"plans":[{"type":"hotel","title":"Hotel Plaza","confirmation_ref":"H1","parts":[
+		{"type":"hotel","confidence":"high","start_date":"2026-06-12","end_date":"2026-06-15","hotel":{"property_name":"Hotel Plaza","address":"1 Main St"}}
+	]}]}`
+	h := newHarness(t, llmResp, nil, false)
+	h.enablePlanCapture(llmResp)
+	ctx := context.Background()
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
+	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// No pre-existing trips.
+	writeMessage(t, h.maildir, "30", goodMessage)
+	if state := h.runUntilProcessed(t, "30", 5*time.Second); state != "removed" {
+		t.Fatalf("expected removed, got %s", state)
+	}
+	trips, err := h.store.ListTrips(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trips) != 1 {
+		t.Fatalf("expected 1 auto-created trip, got %d", len(trips))
+	}
+	plans, err := h.store.PlansByTrip(ctx, trips[0].ID)
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("PlansByTrip = %d, %v", len(plans), err)
+	}
+	if plans[0].Type != "hotel" || plans[0].Source != "email" {
+		t.Errorf("plan = %+v, want hotel/email", plans[0])
+	}
+}
+
+// TestIngest_PlanCapture_AttachesToExistingTrip verifies the date-proximity
+// selection attaches the ingested plan to an overlapping existing trip rather
+// than creating a new one.
+func TestIngest_PlanCapture_AttachesToExistingTrip(t *testing.T) {
+	llmResp := `{"plans":[{"type":"hotel","title":"Hotel Plaza","confirmation_ref":"H1","parts":[
+		{"type":"hotel","confidence":"high","start_date":"2026-06-12","end_date":"2026-06-15","hotel":{"property_name":"Hotel Plaza"}}
+	]}]}`
+	h := newHarness(t, llmResp, nil, false)
+	h.enablePlanCapture(llmResp)
+	ctx := context.Background()
+	u, _ := h.store.InviteUser(ctx, store.InvitePayload{Username: "alice"})
+	if err := h.store.UpsertVerifiedEmail(ctx, u.ID, "alice@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing trip spanning the hotel's dates (via a flight plan part).
+	trip, err := h.store.CreateTrip(ctx, store.CreateTripPayload{Name: "Existing"}, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC)
+	in := time.Date(2026, 6, 16, 17, 0, 0, 0, time.UTC)
+	if _, err := h.store.CreatePlan(ctx, store.CreatePlanPayload{
+		TripID: trip.ID, Type: "flight", Title: "BA1",
+		Parts: []store.CreatePlanPartPayload{{
+			StartsAt: out, EndsAt: &in,
+			Flight: &store.FlightDetail{Ident: "BA1", ScheduledOut: out, ScheduledIn: in, OriginIATA: "LHR", DestIATA: "JFK"},
+		}},
+	}, u.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	writeMessage(t, h.maildir, "31", goodMessage)
+	if state := h.runUntilProcessed(t, "31", 5*time.Second); state != "removed" {
+		t.Fatalf("expected removed, got %s", state)
+	}
+	trips, err := h.store.ListTrips(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trips) != 1 {
+		t.Fatalf("expected the hotel to attach to the existing trip (1 trip), got %d", len(trips))
+	}
+	plans, _ := h.store.PlansByTrip(ctx, trip.ID)
+	var hotels int
+	for _, p := range plans {
+		if p.Type == "hotel" {
+			hotels++
+		}
+	}
+	if hotels != 1 {
+		t.Errorf("expected 1 hotel plan on existing trip, got %d", hotels)
 	}
 }

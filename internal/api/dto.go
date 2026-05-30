@@ -271,6 +271,26 @@ type PlanDTO struct {
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
+// ProposedPlanDTO is a plan the ingest pipeline proposes, awaiting
+// confirmation (matches the FE ProposedPlan). Confidence is 0..1;
+// SupersedesPartID is set when the proposal would supersede an existing part
+// (a rebooking).
+type ProposedPlanDTO struct {
+	Type             string        `json:"type"`
+	Title            string        `json:"title"`
+	ConfirmationRef  string        `json:"confirmation_ref"`
+	Notes            string        `json:"notes"`
+	Confidence       float64       `json:"confidence"`
+	Parts            []PlanPartDTO `json:"parts"`
+	SupersedesPartID *int64        `json:"supersedes_part_id,omitempty"`
+}
+
+// IngestResultDTO is the response of the propose endpoint (matches the FE
+// IngestResult). Proposals is always non-nil.
+type IngestResultDTO struct {
+	Proposals []ProposedPlanDTO `json:"proposals"`
+}
+
 // PlanVisibilityDTO carries the per-plan privacy mode and named users.
 // mode is "everyone" when no override row exists; user_ids is always non-nil.
 type PlanVisibilityDTO struct {

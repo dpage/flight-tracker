@@ -13,6 +13,7 @@ import (
 
 	"github.com/dpage/aerly/internal/api"
 	"github.com/dpage/aerly/internal/flightops"
+	"github.com/dpage/aerly/internal/planops"
 	"github.com/dpage/aerly/internal/providers"
 	"github.com/dpage/aerly/internal/sse"
 	"github.com/dpage/aerly/internal/store"
@@ -35,6 +36,12 @@ type Service struct {
 	Store      *store.Store
 	Extractor  *Extractor
 	FlightDeps flightops.Deps
+	// PlanDeps wires the generalized planops capture path (multi-type plans
+	// + date-proximity trip selection). When its Store is set, processOne
+	// runs the planops path for non-flight bookings alongside the legacy
+	// flight handling. Optional — when zero, only flights are ingested
+	// (the Wave-1 behaviour).
+	PlanDeps planops.Deps
 	// Hub is the SSE broadcast hub. Optional — when nil, ingested flights
 	// are still inserted but connected clients won't learn of them until
 	// they refresh. Wired in production; tests opt in via newHarness.
@@ -196,6 +203,16 @@ func (s *Service) processOne(ctx context.Context, path string) outcome {
 		s.publishFlight(ctx, f.ID)
 	}
 
+	// Generalized planops capture: non-flight bookings (hotel/train/ground/
+	// dining/excursion) are grouped into plans, attached to a trip chosen by
+	// date proximity (auto-creating one when nothing matches), and committed
+	// against that trip. Flights stay on the legacy path above for tracker /
+	// SSE continuity. Gated on PlanDeps being wired so the Wave-1 flight-only
+	// behaviour is unchanged when it isn't.
+	if s.PlanDeps.Store != nil {
+		s.captureNonFlightPlans(ctx, u.ID, body, docs)
+	}
+
 	status := "accepted"
 	switch {
 	case len(legs) == 0:
@@ -296,6 +313,102 @@ func failureReason(err error) string {
 		s = s[:200] + "…"
 	}
 	return s
+}
+
+// captureNonFlightPlans runs the planops capture path for the non-flight
+// bookings in an email. It proposes plans (tripID 0 → no rebooking match
+// pre-attach), picks a target trip by date proximity (auto-creating one when
+// nothing overlaps), and commits each plan against that trip. Failures are
+// logged, not fatal: the legacy flight reply still goes out. Flight plans are
+// skipped here — they are handled by the flightops path so the tracker keeps
+// its single source of truth this wave.
+func (s *Service) captureNonFlightPlans(ctx context.Context, userID int64, body string, emDocs []Document) {
+	docs := make([]planops.Document, 0, len(emDocs))
+	for _, d := range emDocs {
+		docs = append(docs, planops.Document{Data: d.Data, MediaType: d.MediaType, Filename: d.Filename})
+	}
+	proposals, err := planops.Propose(ctx, s.PlanDeps, userID, 0, body, docs)
+	if err != nil {
+		slog.Warn("emailingest: planops propose", "err", err)
+		return
+	}
+	for _, p := range proposals {
+		if p.Type == "flight" {
+			continue
+		}
+		start, end := planops.PlanSpan(p.Parts)
+		tripID, ok, err := planops.SelectTrip(ctx, s.PlanDeps, userID, start, end)
+		if err != nil {
+			slog.Warn("emailingest: planops select trip", "err", err)
+			continue
+		}
+		if !ok {
+			tripID, err = s.createTripForPlan(ctx, userID, p, start, end)
+			if err != nil {
+				slog.Warn("emailingest: create trip for ingested plan", "err", err)
+				continue
+			}
+		}
+		if _, err := planops.Commit(ctx, s.PlanDeps, tripID, userID, []planops.ConfirmPlanInput{toConfirmInput(p)}); err != nil {
+			slog.Warn("emailingest: planops commit", "err", err, "trip", tripID)
+		}
+	}
+}
+
+// createTripForPlan auto-creates a trip named from the plan title / dates when
+// no existing trip matches by date proximity (spec §6.3).
+func (s *Service) createTripForPlan(ctx context.Context, userID int64, p planops.ProposedPlan, start, end time.Time) (int64, error) {
+	name := p.Title
+	if name == "" {
+		name = "Trip from email"
+	}
+	in := store.CreateTripPayload{Name: name}
+	if !start.IsZero() {
+		s := start
+		in.StartsOn = &s
+	}
+	if !end.IsZero() {
+		e := end
+		in.EndsOn = &e
+	}
+	t, err := s.Store.CreateTrip(ctx, in, userID)
+	if err != nil {
+		return 0, err
+	}
+	return t.ID, nil
+}
+
+// toConfirmInput converts a proposed plan into a confirm payload. Email ingest
+// has no interactive confirm UI, so it confirms the proposal as-extracted with
+// the sender as sole passenger; the user can correct or move it afterwards.
+func toConfirmInput(p planops.ProposedPlan) planops.ConfirmPlanInput {
+	in := planops.ConfirmPlanInput{
+		Type:             p.Type,
+		Title:            p.Title,
+		ConfirmationRef:  p.ConfirmationRef,
+		Notes:            p.Notes,
+		Source:           "email",
+		SupersedesPartID: p.SupersedesPartID,
+	}
+	for _, part := range p.Parts {
+		in.Parts = append(in.Parts, planops.ConfirmPartInput{
+			Type:       part.Type,
+			StartsAt:   part.StartsAt,
+			EndsAt:     part.EndsAt,
+			StartTZ:    part.StartTZ,
+			EndTZ:      part.EndTZ,
+			StartLabel: part.StartLabel,
+			EndLabel:   part.EndLabel,
+			Status:     part.Status,
+			Flight:     part.Flight,
+			Hotel:      part.Hotel,
+			Train:      part.Train,
+			Ground:     part.Ground,
+			Dining:     part.Dining,
+			Excursion:  part.Excursion,
+		})
+	}
+	return in
 }
 
 // publishFlight broadcasts a flight.updated SSE event for the just-inserted

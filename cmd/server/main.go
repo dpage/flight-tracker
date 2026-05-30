@@ -23,6 +23,7 @@ import (
 	"github.com/dpage/aerly/internal/emailingest"
 	"github.com/dpage/aerly/internal/flightops"
 	"github.com/dpage/aerly/internal/handlers"
+	"github.com/dpage/aerly/internal/planops"
 	"github.com/dpage/aerly/internal/poller"
 	"github.com/dpage/aerly/internal/providers"
 	"github.com/dpage/aerly/internal/sse"
@@ -131,6 +132,10 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		extractor := emailingest.NewExtractor(llmClient, cfg.LLMModel)
+		// Wire the same LLM-backed extractor into the HTTP ingest endpoints
+		// (paste/upload → propose/confirm).
+		api.Extractor = extractor
 		svc := &emailingest.Service{
 			Cfg: emailingest.Config{
 				MaildirPath:   cfg.EmailIngestMaildir,
@@ -142,8 +147,9 @@ func run() error {
 				PublicURL:     cfg.PublicURL,
 			},
 			Store:      s,
-			Extractor:  emailingest.NewExtractor(llmClient, cfg.LLMModel),
+			Extractor:  extractor,
 			FlightDeps: flightops.Deps{Store: s, Resolver: resolver},
+			PlanDeps:   planops.Deps{Store: s, Extractor: extractor, Resolver: resolver},
 			Hub:        hub,
 		}
 		go func() {

@@ -211,6 +211,63 @@ func TestExtract_DropsMalformedManualFields(t *testing.T) {
 	}
 }
 
+func TestExtractPlans_MultiType(t *testing.T) {
+	resp := `{"plans":[
+	  {"type":"flight","title":"BA to JFK","confirmation_ref":"PNR9","parts":[
+	     {"type":"flight","confidence":"high","flight":{"ident":"BA286","date":"2026-06-12","origin_iata":"lhr","dest_iata":"jfk","depart_time":"09:00","arrive_date":"2026-06-12","arrive_time":"12:00"}}
+	  ]},
+	  {"type":"hotel","title":"Hotel Plaza","confirmation_ref":"H1","parts":[
+	     {"type":"hotel","confidence":"high","start_date":"2026-06-12","end_date":"2026-06-15","hotel":{"property_name":"Hotel Plaza","address":"1 Main St"}}
+	  ]}
+	]}`
+	x, _ := newExtractor(resp)
+	plans, err := x.ExtractPlans(context.Background(), "body", nil)
+	if err != nil {
+		t.Fatalf("ExtractPlans: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("len(plans) = %d, want 2", len(plans))
+	}
+	var fl, ho int
+	for _, p := range plans {
+		switch p.Type {
+		case "flight":
+			fl++
+			if len(p.Parts) != 1 || p.Parts[0].Flight.Ident != "BA286" {
+				t.Errorf("flight part wrong: %+v", p.Parts)
+			}
+			if p.Parts[0].Flight.OriginIATA != "LHR" || p.Parts[0].Flight.DestIATA != "JFK" {
+				t.Errorf("IATAs not upper-cased: %+v", p.Parts[0].Flight)
+			}
+		case "hotel":
+			ho++
+			if p.Parts[0].HotelName != "Hotel Plaza" || p.Parts[0].StartDate != "2026-06-12" {
+				t.Errorf("hotel part wrong: %+v", p.Parts[0])
+			}
+		}
+	}
+	if fl != 1 || ho != 1 {
+		t.Errorf("want 1 flight + 1 hotel, got %d/%d", fl, ho)
+	}
+}
+
+func TestExtractPlans_DropsLowConfidenceAndDatelessNonFlight(t *testing.T) {
+	resp := `{"plans":[
+	  {"type":"hotel","title":"A","parts":[{"type":"hotel","confidence":"low","start_date":"2026-06-12"}]},
+	  {"type":"dining","title":"B","parts":[{"type":"dining","confidence":"high","reservation_name":"x"}]}
+	]}`
+	x, _ := newExtractor(resp)
+	plans, err := x.ExtractPlans(context.Background(), "body", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Low-confidence hotel dropped; dining with no start_date dropped → both
+	// plans end up empty and omitted.
+	if len(plans) != 0 {
+		t.Errorf("plans = %+v, want empty", plans)
+	}
+}
+
 func TestStripCodeFence(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"hello", "hello"},
