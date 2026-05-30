@@ -15,6 +15,9 @@ var (
 	ErrAddressTaken    = errors.New("address already registered")
 	ErrAlreadyVerified = errors.New("address already verified")
 	ErrUsernameTaken   = errors.New("username already registered")
+	// ErrNotImplemented is returned by store methods whose bodies are stubbed
+	// out in the Wave 0a foundation and filled in by later feature waves.
+	ErrNotImplemented = errors.New("not implemented")
 )
 
 const userColumns = `id, username, name, avatar_url,
